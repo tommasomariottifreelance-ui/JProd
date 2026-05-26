@@ -32,7 +32,7 @@ export default function Brands() {
 
   const saveEdit = async (b) => {
     setSaving(true)
-    await supabase.from('brands').update({ name: editForm.name, priority: editForm.priority || null }).eq('id', b.id)
+    await supabase.from('brands').update({ name: editForm.name, client_name: editForm.client_name || null, priority: editForm.priority || null }).eq('id', b.id)
     setEditingId(null)
     setSaving(false)
     load()
@@ -86,9 +86,9 @@ export default function Brands() {
               <table>
                 <thead>
                   <tr>
-                    <th>Nome</th>
+                    <th>Codice Cliente</th>
+                    <th>Nome Cliente</th>
                     <th>Priorità</th>
-                    <th>Cliente</th>
                     <th>Creato il</th>
                     <th></th>
                   </tr>
@@ -96,7 +96,7 @@ export default function Brands() {
                 <tbody>
                   {brands.map(b => (
                     <tr key={b.id} style={{ cursor: 'pointer' }}
-                      onClick={() => editingId !== b.id && (setEditingId(b.id), setEditForm({ name: b.name, priority: b.priority || '' }))}>
+                      onClick={() => editingId !== b.id && (setEditingId(b.id), setEditForm({ name: b.name, client_name: b.client_name || '', priority: b.priority || '' }))}>
                       {editingId === b.id ? (
                         <>
                           <td>
@@ -106,13 +106,19 @@ export default function Brands() {
                               style={{ padding: '4px 8px', fontSize: 13 }} />
                           </td>
                           <td>
+                            <input className="form-input" value={editForm.client_name}
+                              onChange={e => setEditForm(f => ({ ...f, client_name: e.target.value }))}
+                              onClick={e => e.stopPropagation()}
+                              placeholder="es. Pelletteria Fiorentina Srl"
+                              style={{ padding: '4px 8px', fontSize: 13 }} />
+                          </td>
+                          <td>
                             <input className="form-input" type="number" value={editForm.priority}
                               onChange={e => setEditForm(f => ({ ...f, priority: e.target.value }))}
                               onClick={e => e.stopPropagation()}
                               placeholder="es. 1"
                               style={{ padding: '4px 8px', fontSize: 13, width: 80 }} />
                           </td>
-                          <td>{b.clients?.name ?? '—'}</td>
                           <td>{b.created_at ? new Date(b.created_at).toLocaleDateString('it-IT') : '—'}</td>
                           <td onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 6 }}>
@@ -126,8 +132,8 @@ export default function Brands() {
                       ) : (
                         <>
                           <td className="font-medium">{b.name}</td>
+                          <td>{b.client_name ?? '—'}</td>
                           <td>{b.priority ?? '—'}</td>
-                          <td>{b.clients?.name ?? '—'}</td>
                           <td className="text-sm text-muted">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString('it-IT') : '—'}
                           </td>
