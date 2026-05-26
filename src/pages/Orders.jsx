@@ -94,6 +94,7 @@ export default function Orders() {
   const [search, setSearch] = useState('')
   const [brands, setBrands] = useState([])
   const [advancing, setAdvancing] = useState(null)
+  const [deleting, setDeleting] = useState(null)
 
   const load = async () => {
     const { data } = await supabase
@@ -107,6 +108,13 @@ export default function Orders() {
   }
 
   useEffect(() => { load() }, [])
+
+  const confirmDelete = async () => {
+    await supabase.from('production_log').delete().eq('order_id', deleting.id)
+    await supabase.from('orders').delete().eq('id', deleting.id)
+    setDeleting(null)
+    load()
+  }
 
   const filtered = orders.filter(o => {
     if (status !== 'all' && o.status !== status) return false
@@ -202,11 +210,16 @@ export default function Orders() {
                         <ProgressBar done={o.quantity_done || 0} total={o.quantity || 0} />
                       </td>
                       <td>
-                        {o.status !== 'completed' && (
-                          <button className="btn btn-primary btn-sm" onClick={() => setAdvancing(o)}>
-                            Avanza
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {o.status !== 'completed' && (
+                            <button className="btn btn-primary btn-sm" onClick={() => setAdvancing(o)}>
+                              Avanza
+                            </button>
+                          )}
+                          <button className="btn btn-danger btn-sm" onClick={() => setDeleting(o)}>
+                            Elimina
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -220,6 +233,24 @@ export default function Orders() {
       {advancing && (
         <AdvanceModal order={advancing} onClose={() => setAdvancing(null)}
           onSaved={() => { setAdvancing(null); load() }} />
+      )}
+
+      {deleting && (
+        <div className="modal-overlay" onClick={() => setDeleting(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">Conferma eliminazione</div>
+            </div>
+            <div className="modal-body">
+              <p className="text-sm">Sei sicuro di voler eliminare l'ordine <strong>{deleting.order_code}</strong>?</p>
+              <p className="text-sm text-muted" style={{ marginTop: 8 }}>Verranno eliminati anche tutti i log di produzione associati.</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeleting(null)}>Annulla</button>
+              <button className="btn btn-danger" onClick={confirmDelete}>Elimina</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
