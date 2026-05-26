@@ -75,28 +75,44 @@ export default function Import() {
     setImporting(true)
     let inserted = 0, updated = 0, skipped = 0
 
+    // Recupera client_id dal profilo utente loggato
+    const { data: profileData } = await supabase
+      .from('users_profiles')
+      .select('client_id')
+      .maybeSingle()
+    const client_id = profileData?.client_id ?? null
+
     for (const row of rows) {
-      // Determine status based on qty
+      // Determina status in base alle quantità
       let status = 'planned'
       if (row.quantity_done > 0 && row.quantity_done < row.quantity) status = 'in_production'
-      if (row.quantity_remaining === 0 || row.quantity_done >= row.quantity) status = 'completed'
+      if (row.quantity_done >= row.quantity && row.quantity > 0) status = 'completed'
 
-      // Find brand
+      // Cerca o crea brand — maybeSingle() evita errore 406
       let brand_id = null
       if (row.brand_name) {
-        const { data: b } = await supabase.from('brands').select('id').ilike('name', row.brand_name).single()
-        if (b) brand_id = b.id
-        else {
-          const { data: nb } = await supabase.from('brands').insert({ name: row.brand_name }).select('id').single()
+        const { data: b } = await supabase
+          .from('brands').select('id')
+          .ilike('name', row.brand_name)
+          .maybeSingle()
+        if (b) {
+          brand_id = b.id
+        } else {
+          const { data: nb } = await supabase
+            .from('brands')
+            .insert({ name: row.brand_name, client_id })
+            .select('id')
+            .maybeSingle()
           if (nb) brand_id = nb.id
         }
       }
 
-      // Upsert order
+      // Payload ordine — senza quantity_remaining (calcolata dalla VIEW)
       const payload = {
         order_code: row.order_code,
         product: row.product,
         brand_id,
+        client_id,
         collection: row.collection,
         reference_nr: row.reference_nr,
         color_code: row.color_code,
@@ -106,11 +122,14 @@ export default function Import() {
         due_date: row.due_date,
         quantity: row.quantity,
         quantity_done: row.quantity_done,
-        quantity_remaining: row.quantity_remaining,
         status,
       }
 
-      const { data: existing } = await supabase.from('orders').select('id').eq('order_code', row.order_code).single()
+      // Upsert: aggiorna se esiste, inserisce se nuovo
+      const { data: existing } = await supabase
+        .from('orders').select('id')
+        .eq('order_code', row.order_code)
+        .maybeSingle()
       if (existing) {
         await supabase.from('orders').update(payload).eq('id', existing.id)
         updated++
