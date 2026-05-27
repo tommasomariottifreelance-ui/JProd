@@ -213,3 +213,37 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- ------------------------------------------------------------
+-- 10. PERMESSI VIEW orders_with_totals
+--     Necessario per esporre la VIEW tramite API Supabase
+-- ------------------------------------------------------------
+GRANT SELECT ON orders_with_totals TO authenticated;
+GRANT SELECT ON orders_with_totals TO anon;
+
+-- ------------------------------------------------------------
+-- 11. Aggiorna VIEW con minuti disponibili effettivi per linea
+--     capacity_minutes = available_hours_per_day * 60 * efficiency
+-- ------------------------------------------------------------
+DROP VIEW IF EXISTS orders_with_totals;
+CREATE VIEW orders_with_totals AS
+SELECT
+  o.*,
+  b.name                                              AS brand_name,
+  pl.name                                             AS line_name,
+  ROUND(COALESCE(pl.available_hours_per_day, 0) * 60 * COALESCE(pl.efficiency, 1))
+                                                      AS line_capacity_minutes,
+  COALESCE(SUM(lg.produced_qt), 0)                   AS quantity_produced,
+  GREATEST(o.quantity - COALESCE(SUM(lg.produced_qt), 0), 0) AS quantity_remaining,
+  ROUND(
+    COALESCE(SUM(lg.produced_qt), 0)::numeric
+    / NULLIF(o.quantity, 0) * 100, 1
+  )                                                   AS progress_pct
+FROM orders o
+LEFT JOIN brands           b  ON b.id  = o.brand_id
+LEFT JOIN production_lines pl ON pl.id = o.assigned_line_id
+LEFT JOIN production_log   lg ON lg.order_id = o.id
+GROUP BY o.id, b.name, pl.name, pl.available_hours_per_day, pl.efficiency;
+
+GRANT SELECT ON orders_with_totals TO authenticated;
+GRANT SELECT ON orders_with_totals TO anon;

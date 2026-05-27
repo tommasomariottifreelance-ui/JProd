@@ -11,7 +11,7 @@ export default function Reports() {
   useEffect(() => {
     async function load() {
       const [{ data: o }, { data: l }] = await Promise.all([
-        supabase.from('orders').select('*, brands(name), production_lines(name)'),
+        supabase.from('orders_with_totals').select('*'),
         supabase.from('production_log').select('*, orders(order_code, product)').order('date')
       ])
       setOrders(o || [])
@@ -24,11 +24,11 @@ export default function Reports() {
   // By brand performance
   const byBrand = {}
   orders.forEach(o => {
-    const b = o.brands?.name ?? 'N/D'
+    const b = o.brand_name ?? 'N/D'
     if (!byBrand[b]) byBrand[b] = { brand: b, total: 0, done: 0, planned: 0, in_production: 0 }
     byBrand[b].total++
     byBrand[b][o.status] = (byBrand[b][o.status] || 0) + 1
-    byBrand[b].done += (o.quantity_done || 0)
+    byBrand[b].done += (o.quantity_produced || 0)
   })
   const brandData = Object.values(byBrand)
 
@@ -44,19 +44,19 @@ export default function Reports() {
 
   // Summary stats
   const totalQty = orders.reduce((s, o) => s + (o.quantity || 0), 0)
-  const doneQty = orders.reduce((s, o) => s + (o.quantity_done || 0), 0)
+  const doneQty = orders.reduce((s, o) => s + (o.quantity_produced || 0), 0)
   const pctDone = totalQty > 0 ? Math.round((doneQty / totalQty) * 100) : 0
 
   const exportExcel = () => {
     const rows = orders.map(o => ({
       'Nr. Ordine': o.order_code,
       'Prodotto': o.product,
-      'Brand': o.brands?.name ?? '',
+      'Brand': o.brand_name ?? '',
       'Collezione': o.collection ?? '',
-      'Linea': o.production_lines?.name ?? '',
+      'Linea': o.line_name ?? '',
       'Stato': o.status,
       'Quantità': o.quantity,
-      'Prodotta': o.quantity_done ?? 0,
+      'Prodotta': o.quantity_produced ?? 0,
       'Residua': o.quantity_remaining ?? o.quantity,
       'Scadenza': o.due_date ?? '',
     }))
@@ -172,8 +172,8 @@ export default function Reports() {
                         <td>{b.done || 0}</td>
                         <td>
                           <span style={{ fontWeight: 600, color: 'var(--blue)' }}>
-                            {orders.filter(o => o.brands?.name === b.brand)
-                              .reduce((s, o) => s + (o.quantity_done || 0), 0).toLocaleString()}
+                            {orders.filter(o => o.brand_name === b.brand)
+                              .reduce((s, o) => s + (o.quantity_produced || 0), 0).toLocaleString()}
                           </span>
                         </td>
                       </tr>

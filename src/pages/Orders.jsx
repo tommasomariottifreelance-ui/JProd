@@ -25,22 +25,27 @@ function AdvanceModal({ order, onClose, onSaved }) {
   const handle = async () => {
     const q = parseInt(qty)
     if (!q || q <= 0) { setError('Inserisci una quantità valida'); return }
+    const remaining = order.quantity_remaining ?? (order.quantity - (order.quantity_produced || 0))
+    if (q > remaining) { setError(`Massimo ${remaining} pz rimanenti`); return }
     setSaving(true)
-    // Insert log
-    await supabase.from('production_log').insert({
+
+    // Inserisce solo nel log — quantity_produced e progress_pct
+    // vengono ricalcolati automaticamente dalla VIEW orders_with_totals
+    const { error: logError } = await supabase.from('production_log').insert({
       order_id: order.id,
       produced_qt: q,
       date: new Date().toISOString().split('T')[0],
-      operator: note || 'operatore'
+      operator: note || 'operatore',
+      client_id: order.client_id,
     })
-    // Update order
-    const newDone = (order.quantity_done || 0) + q
-    const newStatus = newDone >= order.quantity ? 'completed' : 'in_production'
-    await supabase.from('orders').update({
-      quantity_done: newDone,
-      quantity_remaining: Math.max(0, order.quantity - newDone),
-      status: newStatus
-    }).eq('id', order.id)
+
+    if (logError) { setError('Errore nel salvataggio'); setSaving(false); return }
+
+    // Aggiorna solo lo status sull'ordine — niente quantity_done manuale
+    const newProduced = (order.quantity_produced || 0) + q
+    const newStatus = newProduced >= order.quantity ? 'completed' : 'in_production'
+    await supabase.from('orders').update({ status: newStatus }).eq('id', order.id)
+
     setSaving(false)
     onSaved()
   }
@@ -58,9 +63,10 @@ function AdvanceModal({ order, onClose, onSaved }) {
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ background: 'var(--gray-50)', borderRadius: 10, padding: '12px 16px' }}>
             <div className="text-sm font-medium" style={{ marginBottom: 8 }}>{order.product}</div>
-            <ProgressBar done={order.quantity_done || 0} total={order.quantity || 0} />
+            <ProgressBar done={order.quantity_produced || 0} total={order.quantity || 0} />
             <div className="text-xs text-muted" style={{ marginTop: 6 }}>
-              {order.quantity_done || 0} di {order.quantity || 0} pz completati
+              {order.quantity_produced || 0} di {order.quantity || 0} pz completati
+              · rimanenti: <strong>{order.quantity_remaining ?? order.quantity}</strong>
             </div>
           </div>
           <div className="form-group">
@@ -97,12 +103,14 @@ export default function Orders() {
   const [deleting, setDeleting] = useState(null)
 
   const load = async () => {
+    // Usa la VIEW orders_with_totals che calcola dinamicamente
+    // quantity_produced, quantity_remaining e progress_pct dal production_log
     const { data } = await supabase
-      .from('orders')
-      .select('*, brands(name), production_lines(name)')
+      .from('orders_with_totals')
+      .select('*')
       .order('due_date', { ascending: true })
     setOrders(data || [])
-    const bs = [...new Set((data || []).map(o => o.brands?.name).filter(Boolean))]
+    const bs = [...new Set((data || []).map(o => o.brand_name).filter(Boolean))]
     setBrands(bs)
     setLoading(false)
   }
@@ -118,7 +126,7 @@ export default function Orders() {
 
   const filtered = orders.filter(o => {
     if (status !== 'all' && o.status !== status) return false
-    if (brand !== 'all' && o.brands?.name !== brand) return false
+    if (brand !== 'all' && o.brand_name !== brand) return false
     if (search && !o.order_code?.toLowerCase().includes(search.toLowerCase()) &&
         !o.product?.toLowerCase().includes(search.toLowerCase())) return false
     return true
@@ -187,9 +195,9 @@ export default function Orders() {
                         <div className="font-medium" style={{ fontSize: 13 }}>{o.product || '—'}</div>
                         {o.collection && <div className="text-xs text-muted">{o.collection}</div>}
                       </td>
-                      <td>{o.brands?.name ?? '—'}</td>
+                      <td>{o.brand_name ?? '—'}</td>
                       <td>{o.collection || '—'}</td>
-                      <td>{o.production_lines?.name ?? '—'}</td>
+                      <td>{o.line_name ?? '—'}</td>
                       <td>
                         {o.due_date ? (
                           <span style={{
@@ -207,7 +215,7 @@ export default function Orders() {
                         </span>
                       </td>
                       <td style={{ minWidth: 140 }}>
-                        <ProgressBar done={o.quantity_done || 0} total={o.quantity || 0} />
+                        <ProgressBar done={o.quantity_produced || 0} total={o.quantity || 0} />
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>

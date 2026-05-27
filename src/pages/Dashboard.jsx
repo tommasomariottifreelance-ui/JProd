@@ -13,7 +13,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function load() {
-      const { data: orders } = await supabase.from('orders').select('*, brands(name)')
+      const { data: orders } = await supabase.from('orders_with_totals').select('*')
       if (!orders) return
 
       const total = orders.length
@@ -25,7 +25,7 @@ export default function Dashboard() {
       // By brand
       const brandMap = {}
       orders.forEach(o => {
-        const b = o.brands?.name ?? 'N/D'
+        const b = o.brand_name ?? 'N/D'
         brandMap[b] = (brandMap[b] || 0) + 1
       })
       setByBrand(Object.entries(brandMap).map(([name, value]) => ({ name, value })))

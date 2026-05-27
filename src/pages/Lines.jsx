@@ -11,7 +11,7 @@ export default function Lines() {
   const [editForm, setEditForm]   = useState({})
   const [saving, setSaving]       = useState(false)
   const [showNew, setShowNew]     = useState(false)
-  const [newForm, setNewForm]     = useState({ name: '', daily_capacity: '', efficiency: '1', active: true })
+  const [newForm, setNewForm]     = useState({ name: '', minutes_per_day: '', efficiency: '1', active: true })
   const [addSaving, setAddSaving] = useState(false)
 
   const load = async () => {
@@ -27,13 +27,13 @@ export default function Lines() {
     setAddSaving(true)
     await supabase.from('production_lines').insert({
       name: newForm.name,
-      daily_capacity: parseInt(newForm.daily_capacity) || null,
+      available_hours_per_day: newForm.minutes_per_day ? parseFloat(newForm.minutes_per_day) / 60 : null,
       efficiency: parseFloat(newForm.efficiency) || 1,
       active: newForm.active,
       client_id: profile?.client_id ?? null,
     })
     setShowNew(false)
-    setNewForm({ name: '', daily_capacity: '', efficiency: '1', active: true })
+    setNewForm({ name: '', minutes_per_day: '', efficiency: '1', active: true })
     setAddSaving(false)
     load()
   }
@@ -42,7 +42,7 @@ export default function Lines() {
     setSaving(true)
     await supabase.from('production_lines').update({
       name: editForm.name,
-      daily_capacity: parseInt(editForm.daily_capacity) || null,
+      available_hours_per_day: editForm.minutes_per_day ? parseFloat(editForm.minutes_per_day) / 60 : null,
       efficiency: parseFloat(editForm.efficiency) || 1,
       active: editForm.active,
     }).eq('id', l.id)
@@ -79,8 +79,8 @@ export default function Lines() {
                 <input className="form-input" value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))} placeholder="es. Grande Pelletteria" />
               </div>
               <div className="form-group">
-                <label className="form-label">Capacità/giorno</label>
-                <input className="form-input" type="number" value={newForm.daily_capacity} onChange={e => setNewForm(f => ({ ...f, daily_capacity: e.target.value }))} placeholder="es. 100" />
+                <label className="form-label">Min. disponibili/giorno</label>
+                <input className="form-input" type="number" value={newForm.minutes_per_day} onChange={e => setNewForm(f => ({ ...f, minutes_per_day: e.target.value }))} placeholder="es. 480" />
               </div>
               <div className="form-group">
                 <label className="form-label">Efficienza</label>
@@ -117,7 +117,7 @@ export default function Lines() {
                 <thead>
                   <tr>
                     <th>Nome</th>
-                    <th>Capacità / giorno</th>
+                    <th>Min. disponibili/giorno</th>
                     <th>Efficienza</th>
                     <th>Stato</th>
                     <th></th>
@@ -126,7 +126,7 @@ export default function Lines() {
                 <tbody>
                   {lines.map(l => (
                     <tr key={l.id} style={{ cursor: 'pointer' }}
-                      onClick={() => editingId !== l.id && (setEditingId(l.id), setEditForm({ name: l.name, daily_capacity: l.daily_capacity || '', efficiency: l.efficiency || 1, active: l.active }))}>
+                      onClick={() => editingId !== l.id && (setEditingId(l.id), setEditForm({ name: l.name, minutes_per_day: l.available_hours_per_day ? Math.round(l.available_hours_per_day * 60) : '', efficiency: l.efficiency || 1, active: l.active }))}>
                       {editingId === l.id ? (
                         <>
                           <td>
@@ -136,9 +136,10 @@ export default function Lines() {
                               style={{ padding: '4px 8px', fontSize: 13 }} />
                           </td>
                           <td>
-                            <input className="form-input" type="number" value={editForm.daily_capacity}
-                              onChange={e => setEditForm(f => ({ ...f, daily_capacity: e.target.value }))}
+                            <input className="form-input" type="number" value={editForm.minutes_per_day}
+                              onChange={e => setEditForm(f => ({ ...f, minutes_per_day: e.target.value }))}
                               onClick={e => e.stopPropagation()}
+                              placeholder="es. 480"
                               style={{ padding: '4px 8px', fontSize: 13, width: 90 }} />
                           </td>
                           <td>
@@ -166,7 +167,7 @@ export default function Lines() {
                       ) : (
                         <>
                           <td className="font-medium">{l.name}</td>
-                          <td>{l.daily_capacity ? `${l.daily_capacity} pz` : '—'}</td>
+                          <td>{l.available_hours_per_day ? `${Math.round(l.available_hours_per_day * 60)} min` : '—'}</td>
                           <td>{l.efficiency ? `${Math.round(l.efficiency * 100)}%` : '—'}</td>
                           <td>
                             <span className={`badge ${l.active ? 'badge-in_production' : 'badge-on_hold'}`}>
