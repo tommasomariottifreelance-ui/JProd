@@ -7,6 +7,8 @@ export default function Brands() {
   const [brands, setBrands]       = useState([])
   const [loading, setLoading]     = useState(true)
   const [deleting, setDeleting]   = useState(null)
+  const [selected, setSelected]     = useState(new Set())
+  const [deletingSelected, setDeletingSelected] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm]   = useState({})
   const [saving, setSaving]       = useState(false)
@@ -16,6 +18,7 @@ export default function Brands() {
   const load = async () => {
     const { data } = await supabase.from('brands').select('*, clients(name)').order('name')
     setBrands(data || [])
+    setSelected(new Set())
     setLoading(false)
   }
 
@@ -38,9 +41,19 @@ export default function Brands() {
     load()
   }
 
+  const allSelected = brands.length > 0 && brands.every(b => selected.has(b.id))
+  const toggleAll = () => { if (allSelected) setSelected(new Set()); else setSelected(new Set(brands.map(b => b.id))) }
+  const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
   const confirmDelete = async () => {
     await supabase.from('brands').delete().eq('id', deleting.id)
     setDeleting(null)
+    load()
+  }
+
+  const confirmDeleteSelected = async () => {
+    await supabase.from('brands').delete().in('id', [...selected])
+    setDeletingSelected(false)
     load()
   }
 
@@ -53,6 +66,13 @@ export default function Brands() {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div style={{ padding: '8px 32px', background: 'var(--ice-light)', borderBottom: '1px solid var(--ice)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="text-sm" style={{ color: 'var(--blue)' }}>{selected.size} selezionati</span>
+          <button className="btn btn-danger btn-sm" onClick={() => setDeletingSelected(true)}>Elimina selezionati</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Deseleziona</button>
+        </div>
+      )}
       <div className="page-content">
         <div className="card card-body mb-4">
           <div className="card-title mb-4">Aggiungi brand</div>
@@ -86,6 +106,7 @@ export default function Brands() {
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} /></th>
                     <th>Codice Cliente</th>
                     <th>Nome Cliente</th>
                     <th>Priorità</th>
@@ -99,6 +120,7 @@ export default function Brands() {
                       onClick={() => editingId !== b.id && (setEditingId(b.id), setEditForm({ name: b.name, client_name: b.client_name || '', priority: b.priority || '' }))}>
                       {editingId === b.id ? (
                         <>
+                          <td><input type="checkbox" checked={selected.has(b.id)} onChange={() => toggleOne(b.id)} style={{ cursor: 'pointer' }} /></td>
                           <td>
                             <input className="form-input" value={editForm.name}
                               onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
@@ -131,6 +153,7 @@ export default function Brands() {
                         </>
                       ) : (
                         <>
+                          <td><input type="checkbox" checked={selected.has(b.id)} onChange={() => toggleOne(b.id)} style={{ cursor: 'pointer' }} /></td>
                           <td className="font-medium">{b.name}</td>
                           <td>{b.client_name ?? '—'}</td>
                           <td>{b.priority ?? '—'}</td>
@@ -161,6 +184,20 @@ export default function Brands() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setDeleting(null)}>Annulla</button>
               <button className="btn btn-danger" onClick={confirmDelete}>Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deletingSelected && (
+        <div className="modal-overlay" onClick={() => setDeletingSelected(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header"><div className="modal-title">Conferma eliminazione multipla</div></div>
+            <div className="modal-body">
+              <p className="text-sm">Sei sicuro di voler eliminare <strong>{selected.size} brand</strong>?</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeletingSelected(false)}>Annulla</button>
+              <button className="btn btn-danger" onClick={confirmDeleteSelected}>Elimina tutti</button>
             </div>
           </div>
         </div>

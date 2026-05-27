@@ -7,6 +7,8 @@ export default function Lines() {
   const [lines, setLines]         = useState([])
   const [loading, setLoading]     = useState(true)
   const [deleting, setDeleting]   = useState(null)
+  const [selected, setSelected]     = useState(new Set())
+  const [deletingSelected, setDeletingSelected] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm]   = useState({})
   const [saving, setSaving]       = useState(false)
@@ -17,6 +19,7 @@ export default function Lines() {
   const load = async () => {
     const { data } = await supabase.from('production_lines').select('*').order('name')
     setLines(data || [])
+    setSelected(new Set())
     setLoading(false)
   }
 
@@ -51,9 +54,19 @@ export default function Lines() {
     load()
   }
 
+  const allSelected = lines.length > 0 && lines.every(l => selected.has(l.id))
+  const toggleAll = () => { if (allSelected) setSelected(new Set()); else setSelected(new Set(lines.map(l => l.id))) }
+  const toggleOne = (id) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
   const confirmDelete = async () => {
     await supabase.from('production_lines').delete().eq('id', deleting.id)
     setDeleting(null)
+    load()
+  }
+
+  const confirmDeleteSelected = async () => {
+    await supabase.from('production_lines').delete().in('id', [...selected])
+    setDeletingSelected(false)
     load()
   }
 
@@ -69,6 +82,13 @@ export default function Lines() {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div style={{ padding: '8px 32px', background: 'var(--ice-light)', borderBottom: '1px solid var(--ice)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="text-sm" style={{ color: 'var(--blue)' }}>{selected.size} selezionati</span>
+          <button className="btn btn-danger btn-sm" onClick={() => setDeletingSelected(true)}>Elimina selezionati</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Deseleziona</button>
+        </div>
+      )}
       <div className="page-content">
         {showNew && (
           <div className="card card-body mb-4">
@@ -116,6 +136,7 @@ export default function Lines() {
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} /></th>
                     <th>Nome</th>
                     <th>Min. disponibili/giorno</th>
                     <th>Efficienza</th>
@@ -129,6 +150,7 @@ export default function Lines() {
                       onClick={() => editingId !== l.id && (setEditingId(l.id), setEditForm({ name: l.name, minutes_per_day: l.available_hours_per_day ? Math.round(l.available_hours_per_day * 60) : '', efficiency: l.efficiency || 1, active: l.active }))}>
                       {editingId === l.id ? (
                         <>
+                          <td><input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleOne(l.id)} style={{ cursor: 'pointer' }} /></td>
                           <td>
                             <input className="form-input" value={editForm.name}
                               onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
@@ -166,6 +188,7 @@ export default function Lines() {
                         </>
                       ) : (
                         <>
+                          <td><input type="checkbox" checked={selected.has(l.id)} onChange={() => toggleOne(l.id)} style={{ cursor: 'pointer' }} /></td>
                           <td className="font-medium">{l.name}</td>
                           <td>{l.available_hours_per_day ? `${Math.round(l.available_hours_per_day * 60)} min` : '—'}</td>
                           <td>{l.efficiency ? `${Math.round(l.efficiency * 100)}%` : '—'}</td>
@@ -198,6 +221,20 @@ export default function Lines() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setDeleting(null)}>Annulla</button>
               <button className="btn btn-danger" onClick={confirmDelete}>Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deletingSelected && (
+        <div className="modal-overlay" onClick={() => setDeletingSelected(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header"><div className="modal-title">Conferma eliminazione multipla</div></div>
+            <div className="modal-body">
+              <p className="text-sm">Sei sicuro di voler eliminare <strong>{selected.size} linee</strong>?</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeletingSelected(false)}>Annulla</button>
+              <button className="btn btn-danger" onClick={confirmDeleteSelected}>Elimina tutte</button>
             </div>
           </div>
         </div>

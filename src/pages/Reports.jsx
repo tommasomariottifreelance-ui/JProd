@@ -25,10 +25,12 @@ export default function Reports() {
   const byBrand = {}
   orders.forEach(o => {
     const b = o.brand_name ?? 'N/D'
-    if (!byBrand[b]) byBrand[b] = { brand: b, total: 0, done: 0, planned: 0, in_production: 0 }
+    if (!byBrand[b]) byBrand[b] = { brand: b, total: 0, completed: 0, planned: 0, in_production: 0, pz_prodotti: 0 }
     byBrand[b].total++
-    byBrand[b][o.status] = (byBrand[b][o.status] || 0) + 1
-    byBrand[b].done += (o.quantity_produced || 0)
+    if (o.status === 'planned') byBrand[b].planned++
+    if (o.status === 'in_production') byBrand[b].in_production++
+    if (o.status === 'completed') byBrand[b].completed++
+    byBrand[b].pz_prodotti += (o.quantity_produced || 0)
   })
   const brandData = Object.values(byBrand)
 
@@ -169,11 +171,10 @@ export default function Reports() {
                         <td>{b.total}</td>
                         <td>{b.planned || 0}</td>
                         <td>{b.in_production || 0}</td>
-                        <td>{b.done || 0}</td>
+                        <td>{b.completed || 0} ordini</td>
                         <td>
                           <span style={{ fontWeight: 600, color: 'var(--blue)' }}>
-                            {orders.filter(o => o.brand_name === b.brand)
-                              .reduce((s, o) => s + (o.quantity_produced || 0), 0).toLocaleString()}
+                            {b.pz_prodotti.toLocaleString()} pz
                           </span>
                         </td>
                       </tr>

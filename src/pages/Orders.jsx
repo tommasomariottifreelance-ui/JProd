@@ -17,10 +17,10 @@ function ProgressBar({ done, total }) {
 }
 
 function AdvanceModal({ order, onClose, onSaved }) {
-  const [qty, setQty] = useState('')
+  const [qty, setQty]   = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError]   = useState('')
 
   const handle = async () => {
     const q = parseInt(qty)
@@ -28,9 +28,6 @@ function AdvanceModal({ order, onClose, onSaved }) {
     const remaining = order.quantity_remaining ?? (order.quantity - (order.quantity_produced || 0))
     if (q > remaining) { setError(`Massimo ${remaining} pz rimanenti`); return }
     setSaving(true)
-
-    // Inserisce solo nel log — quantity_produced e progress_pct
-    // vengono ricalcolati automaticamente dalla VIEW orders_with_totals
     const { error: logError } = await supabase.from('production_log').insert({
       order_id: order.id,
       produced_qt: q,
@@ -38,14 +35,10 @@ function AdvanceModal({ order, onClose, onSaved }) {
       operator: note || 'operatore',
       client_id: order.client_id,
     })
-
     if (logError) { setError('Errore nel salvataggio'); setSaving(false); return }
-
-    // Aggiorna solo lo status sull'ordine — niente quantity_done manuale
     const newProduced = (order.quantity_produced || 0) + q
     const newStatus = newProduced >= order.quantity ? 'completed' : 'in_production'
     await supabase.from('orders').update({ status: newStatus }).eq('id', order.id)
-
     setSaving(false)
     onSaved()
   }
@@ -93,18 +86,18 @@ function AdvanceModal({ order, onClose, onSaved }) {
 }
 
 export default function Orders() {
-  const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [status, setStatus] = useState('all')
-  const [brand, setBrand] = useState('all')
-  const [search, setSearch] = useState('')
-  const [brands, setBrands] = useState([])
+  const [orders, setOrders]     = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [status, setStatus]     = useState('all')
+  const [brand, setBrand]       = useState('all')
+  const [search, setSearch]     = useState('')
+  const [brands, setBrands]     = useState([])
   const [advancing, setAdvancing] = useState(null)
-  const [deleting, setDeleting] = useState(null)
+  const [deleting, setDeleting]   = useState(null)
+  const [selected, setSelected]   = useState(new Set())
+  const [deletingSelected, setDeletingSelected] = useState(false)
 
   const load = async () => {
-    // Usa la VIEW orders_with_totals che calcola dinamicamente
-    // quantity_produced, quantity_remaining e progress_pct dal production_log
     const { data } = await supabase
       .from('orders_with_totals')
       .select('*')
@@ -112,17 +105,11 @@ export default function Orders() {
     setOrders(data || [])
     const bs = [...new Set((data || []).map(o => o.brand_name).filter(Boolean))]
     setBrands(bs)
+    setSelected(new Set())
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
-
-  const confirmDelete = async () => {
-    await supabase.from('production_log').delete().eq('order_id', deleting.id)
-    await supabase.from('orders').delete().eq('id', deleting.id)
-    setDeleting(null)
-    load()
-  }
 
   const filtered = orders.filter(o => {
     if (status !== 'all' && o.status !== status) return false
@@ -132,14 +119,51 @@ export default function Orders() {
     return true
   })
 
+  const allSelected = filtered.length > 0 && filtered.every(o => selected.has(o.id))
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(s => { const n = new Set(s); filtered.forEach(o => n.delete(o.id)); return n })
+    } else {
+      setSelected(s => { const n = new Set(s); filtered.forEach(o => n.add(o.id)); return n })
+    }
+  }
+
+  const toggleOne = (id) => {
+    setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+
+  const confirmDelete = async () => {
+    // Prima elimina i log associati, poi l'ordine
+    await supabase.from('production_log').delete().eq('order_id', deleting.id)
+    const { error } = await supabase.from('orders').delete().eq('id', deleting.id)
+    if (error) { console.error('Delete error:', error); return }
+    setDeleting(null)
+    load()
+  }
+
+  const confirmDeleteSelected = async () => {
+    const ids = [...selected]
+    // Elimina i log in batch poi gli ordini in batch
+    await supabase.from('production_log').delete().in('order_id', ids)
+    await supabase.from('orders').delete().in('id', ids)
+    setDeletingSelected(false)
+    load()
+  }
+
   return (
     <div>
       <div className="topbar">
         <div>
           <div className="topbar-title">Ordini di produzione</div>
-          <div className="topbar-sub">{filtered.length} ordini</div>
+          <div className="topbar-sub">{filtered.length} ordini{selected.size > 0 && ` · ${selected.size} selezionati`}</div>
         </div>
         <div className="topbar-actions">
+          {selected.size > 0 && (
+            <button className="btn btn-danger btn-sm" onClick={() => setDeletingSelected(true)}>
+              Elimina selezionati ({selected.size})
+            </button>
+          )}
           <input className="form-input" style={{ width: 220, padding: '6px 12px' }}
             placeholder="Cerca ordine o prodotto..." value={search}
             onChange={e => setSearch(e.target.value)} />
@@ -176,6 +200,10 @@ export default function Orders() {
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: 36 }}>
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll}
+                        style={{ cursor: 'pointer' }} />
+                    </th>
                     <th>Ordine</th>
                     <th>Prodotto</th>
                     <th>Brand</th>
@@ -189,7 +217,11 @@ export default function Orders() {
                 </thead>
                 <tbody>
                   {filtered.map(o => (
-                    <tr key={o.id}>
+                    <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
+                      <td>
+                        <input type="checkbox" checked={selected.has(o.id)}
+                          onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} />
+                      </td>
                       <td><span className="mono">{o.order_code}</span></td>
                       <td style={{ maxWidth: 200 }}>
                         <div className="font-medium" style={{ fontSize: 13 }}>{o.product || '—'}</div>
@@ -246,9 +278,7 @@ export default function Orders() {
       {deleting && (
         <div className="modal-overlay" onClick={() => setDeleting(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="modal-title">Conferma eliminazione</div>
-            </div>
+            <div className="modal-header"><div className="modal-title">Conferma eliminazione</div></div>
             <div className="modal-body">
               <p className="text-sm">Sei sicuro di voler eliminare l'ordine <strong>{deleting.order_code}</strong>?</p>
               <p className="text-sm text-muted" style={{ marginTop: 8 }}>Verranno eliminati anche tutti i log di produzione associati.</p>
@@ -256,6 +286,22 @@ export default function Orders() {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setDeleting(null)}>Annulla</button>
               <button className="btn btn-danger" onClick={confirmDelete}>Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingSelected && (
+        <div className="modal-overlay" onClick={() => setDeletingSelected(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header"><div className="modal-title">Conferma eliminazione multipla</div></div>
+            <div className="modal-body">
+              <p className="text-sm">Sei sicuro di voler eliminare <strong>{selected.size} ordini</strong>?</p>
+              <p className="text-sm text-muted" style={{ marginTop: 8 }}>Verranno eliminati anche tutti i log di produzione associati.</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDeletingSelected(false)}>Annulla</button>
+              <button className="btn btn-danger" onClick={confirmDeleteSelected}>Elimina tutti</button>
             </div>
           </div>
         </div>
