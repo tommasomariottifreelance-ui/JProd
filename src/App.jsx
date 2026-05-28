@@ -3,7 +3,7 @@ import { AuthProvider, useAuth } from './components/AuthContext'
 import Login from './components/Login'
 import Sidebar from './components/Sidebar'
 import Dashboard from './pages/Dashboard'
-import Orders from './pages/Orders'
+import Production from './pages/Production'
 import ProductionLog from './pages/ProductionLog'
 import Reports from './pages/Reports'
 import Import from './pages/Import'
@@ -17,15 +17,15 @@ function Shell() {
       <Sidebar />
       <div className="main-content">
         <Routes>
-          <Route path="/"                element={<Dashboard />} />
-          <Route path="/orders"          element={<Orders />} />
-          <Route path="/production-log"  element={<ProductionLog />} />
-          <Route path="/reports"         element={<Reports />} />
-          <Route path="/import"          element={<Import />} />
-          <Route path="/lines"           element={<Lines />} />
-          <Route path="/brands"          element={<Brands />} />
-          <Route path="/products"        element={<Products />} />
-          <Route path="*"                element={<Navigate to="/" />} />
+          <Route path="/"           element={<Dashboard />} />
+          <Route path="/production" element={<Production />} />
+          <Route path="/log"        element={<ProductionLog />} />
+          <Route path="/reports"    element={<Reports />} />
+          <Route path="/import"     element={<Import />} />
+          <Route path="/lines"      element={<Lines />} />
+          <Route path="/brands"     element={<Brands />} />
+          <Route path="/products"   element={<Products />} />
+          <Route path="*"           element={<Navigate to="/" />} />
         </Routes>
       </div>
     </div>
@@ -43,9 +43,5 @@ function Guard() {
 }
 
 export default function App() {
-  return (
-    <AuthProvider>
-      <Guard />
-    </AuthProvider>
-  )
+  return <AuthProvider><Guard /></AuthProvider>
 }
