@@ -130,12 +130,34 @@ export default function Import() {
         .from('orders').select('id')
         .eq('order_code', row.order_code)
         .maybeSingle()
+
+      let order_id = null
       if (existing) {
         await supabase.from('orders').update(payload).eq('id', existing.id)
+        order_id = existing.id
         updated++
       } else {
-        const { error } = await supabase.from('orders').insert(payload)
-        if (!error) { inserted++ } else { skipped++ }
+        const { data: newOrder, error } = await supabase
+          .from('orders').insert(payload).select('id').maybeSingle()
+        if (!error && newOrder) { order_id = newOrder.id; inserted++ } else { skipped++ }
+      }
+
+      // Opzione A: se quantity_done > 0 crea log iniziale per alimentare la VIEW
+      // Controlla prima che non esista già un log (evita duplicati su reimport)
+      if (order_id && row.quantity_done > 0) {
+        const { data: existingLog } = await supabase
+          .from('production_log').select('id')
+          .eq('order_id', order_id)
+          .maybeSingle()
+        if (!existingLog) {
+          await supabase.from('production_log').insert({
+            order_id,
+            produced_qt: row.quantity_done,
+            date: row.due_date ?? new Date().toISOString().split('T')[0],
+            operator: 'import Excel',
+            client_id,
+          })
+        }
       }
     }
 

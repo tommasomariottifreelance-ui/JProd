@@ -49,9 +49,10 @@ function ProgressBar({ done, total }) {
 }
 
 // ─── Advance Modal ───────────────────────────────────────────
-function AdvanceModal({ order, onClose, onSaved }) {
-  const [qty, setQty]     = useState('')
-  const [note, setNote]   = useState('')
+function AdvanceModal({ order, lines, onClose, onSaved }) {
+  const [qty, setQty]       = useState('')
+  const [note, setNote]     = useState('')
+  const [lineId, setLineId] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
 
@@ -66,6 +67,7 @@ function AdvanceModal({ order, onClose, onSaved }) {
       date: new Date().toISOString().split('T')[0],
       operator: note || 'operatore',
       client_id: order.client_id,
+      line_id: lineId ? parseInt(lineId) : null,
     })
     if (logError) { setError('Errore nel salvataggio'); setSaving(false); return }
     const newProduced = (order.quantity_produced || 0) + q
@@ -97,6 +99,13 @@ function AdvanceModal({ order, onClose, onSaved }) {
             <label className="form-label">Quantità prodotta oggi</label>
             <input className="form-input" type="number" min="1"
               value={qty} onChange={e => setQty(e.target.value)} placeholder="es. 20" autoFocus />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Linea di produzione (opzionale)</label>
+            <select className="form-select" value={lineId} onChange={e => setLineId(e.target.value)}>
+              <option value="">Nessuna linea specificata</option>
+              {lines.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
           </div>
           <div className="form-group">
             <label className="form-label">Operatore / note</label>
@@ -272,16 +281,19 @@ function TabOrders() {
   const [brand, setBrand]       = useState('all')
   const [search, setSearch]     = useState('')
   const [brands, setBrands]     = useState([])
+  const [lines, setLines]         = useState([])
   const [advancing, setAdvancing] = useState(null)
   const [deleting, setDeleting]   = useState(null)
   const [selected, setSelected]   = useState(new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
 
   const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('orders_with_totals').select('*')
-      .order('due_date', { ascending: true })
+    const [{ data }, { data: linesData }] = await Promise.all([
+      supabase.from('orders_with_totals').select('*').order('due_date', { ascending: true }),
+      supabase.from('production_lines').select('id, name').eq('active', true).order('name')
+    ])
     setOrders(data || [])
+    setLines(linesData || [])
     setBrands([...new Set((data || []).map(o => o.brand_name).filter(Boolean))])
     setSelected(new Set())
     setLoading(false)
@@ -370,6 +382,7 @@ function TabOrders() {
                   <th>Collezione</th>
                   <th>Scadenza</th>
                   <th>Stato</th>
+                  <th>Pz fatti / Totale</th>
                   <th>Avanzamento</th>
                   <th></th>
                 </tr>
@@ -397,6 +410,12 @@ function TabOrders() {
                       ) : '—'}
                     </td>
                     <td><span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span></td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--blue)', fontSize: 13 }}>
+                        {(o.quantity_produced || 0).toLocaleString('it-IT')}
+                      </span>
+                      <span className="text-muted" style={{ fontSize: 12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
+                    </td>
                     <td style={{ minWidth: 140 }}><ProgressBar done={o.quantity_produced || 0} total={o.quantity || 0} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 6 }}>
@@ -414,7 +433,7 @@ function TabOrders() {
         </div>
       </div>
 
-      {advancing && <AdvanceModal order={advancing} onClose={() => setAdvancing(null)} onSaved={() => { setAdvancing(null); load() }} />}
+      {advancing && <AdvanceModal order={advancing} lines={lines} onClose={() => setAdvancing(null)} onSaved={() => { setAdvancing(null); load() }} />}
 
       {deleting && (
         <div className="modal-overlay" onClick={() => setDeleting(null)}>
