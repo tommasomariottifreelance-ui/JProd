@@ -1,0 +1,25 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Redirect SPA - vitale per React Router
+# Senza questa regola, F5 su /orders restituisce 404
+# perché Netlify cerca un file fisico /orders/index.html
+# che non esiste — il routing è gestito interamente da React
+[[redirects]]
+  from = "/*"
+  to   = "/index.html"
+  status = 200
+
+# Headers di sicurezza essenziali per un MES industriale
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Impedisce al browser di "indovinare" il tipo MIME
+    X-Content-Type-Options = "nosniff"
+    # Blocca il sito se caricato in iframe (clickjacking)
+    X-Frame-Options = "DENY"
+    # Forza HTTPS per 1 anno
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    # Limita le sorgenti di script/stili al solo dominio dell'app
+    Referrer-Policy = "strict-origin-when-cross-origin"
