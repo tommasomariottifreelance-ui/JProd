@@ -59,6 +59,7 @@ function AdvanceModal({ order, lines, onClose, onSaved }) {
   const handle = async () => {
     const q = parseInt(qty)
     if (!q || q <= 0) { setError('Inserisci una quantità valida'); return }
+    if (!lineId) { setError('Seleziona la linea di produzione'); return }
     const remaining = order.quantity_remaining ?? (order.quantity - (order.quantity_produced || 0))
     if (q > remaining) { setError(`Massimo ${remaining} pz rimanenti`); return }
     setSaving(true)
@@ -96,14 +97,16 @@ function AdvanceModal({ order, lines, onClose, onSaved }) {
             </div>
           </div>
           <div className="form-group">
-            <label className="form-label">Quantità prodotta oggi</label>
+            <label className="form-label">Quantità prodotta oggi <span style={{ color: 'var(--danger)' }}>*</span></label>
             <input className="form-input" type="number" min="1"
-              value={qty} onChange={e => setQty(e.target.value)} placeholder="es. 20" autoFocus />
+              value={qty} onChange={e => setQty(e.target.value)} placeholder="es. 20" autoFocus
+              style={{ borderColor: !qty ? 'var(--gray-100)' : 'inherit' }} />
           </div>
           <div className="form-group">
-            <label className="form-label">Linea di produzione (opzionale)</label>
-            <select className="form-select" value={lineId} onChange={e => setLineId(e.target.value)}>
-              <option value="">Nessuna linea specificata</option>
+            <label className="form-label">Linea di produzione <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <select className="form-select" value={lineId} onChange={e => setLineId(e.target.value)}
+              style={{ borderColor: !lineId ? 'var(--danger)' : 'inherit' }}>
+              <option value="">— Seleziona linea —</option>
               {lines.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
