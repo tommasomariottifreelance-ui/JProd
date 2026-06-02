@@ -110,14 +110,47 @@ export default function Import() {
         }
       }
 
-      // Cerca product_id per nome (per alimentare il JOIN con time_per_piece)
+      // Cerca o crea prodotto — popola sku da Nr. Articolo Excel
       let product_id = null
       if (row.product) {
-        const { data: prod } = await supabase
-          .from('products').select('id')
-          .ilike('name', row.product.trim())
-          .maybeSingle()
-        if (prod) product_id = prod.id
+        // Prima cerca per SKU (più preciso)
+        let prod = null
+        if (row.sku) {
+          const { data: bysku } = await supabase
+            .from('products').select('id, sku')
+            .ilike('sku', row.sku.trim())
+            .maybeSingle()
+          prod = bysku
+        }
+        // Fallback: cerca per nome
+        if (!prod) {
+          const { data: byname } = await supabase
+            .from('products').select('id, sku')
+            .ilike('name', row.product.trim())
+            .maybeSingle()
+          prod = byname
+        }
+        if (prod) {
+          product_id = prod.id
+          // Aggiorna sku se mancante
+          if (!prod.sku && row.sku) {
+            await supabase.from('products').update({ sku: row.sku }).eq('id', prod.id)
+          }
+        } else {
+          // Crea prodotto con sku e listino
+          const { data: newprod } = await supabase
+            .from('products')
+            .insert({
+              name: row.product.trim(),
+              sku: row.sku ?? null,
+              selling_price: row.listino ?? null,
+              brand_id,
+              client_id,
+            })
+            .select('id')
+            .maybeSingle()
+          if (newprod) product_id = newprod.id
+        }
       }
 
       // Payload ordine — senza quantity_remaining (calcolata dalla VIEW)
@@ -141,7 +174,7 @@ export default function Import() {
         status,
       }
 
-      // Aggiorna selling_price del prodotto se presente nel listino Excel
+      // Aggiorna selling_price se presente nel listino Excel (sempre, per mantenere aggiornato)
       if (product_id && row.listino && row.listino > 0) {
         await supabase.from('products')
           .update({ selling_price: row.listino })

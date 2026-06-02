@@ -13,7 +13,7 @@ export default function ProductionLog() {
   const load = async () => {
     let q = supabase
       .from('production_log')
-      .select('*, orders(order_code, product, brands(name))')
+      .select('*, orders(order_code, product, brands(name)), production_lines(name)')
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(500)
@@ -103,7 +103,7 @@ export default function ProductionLog() {
                     <th>Prodotto</th>
                     <th>Brand</th>
                     <th>Quantità prodotta</th>
-                    <th>Operatore</th>
+                    <th>Linea</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -130,7 +130,7 @@ export default function ProductionLog() {
                           {l.produced_qt} pz
                         </span>
                       </td>
-                      <td style={{ color: 'var(--gray-500)', fontSize: 13 }}>{l.operator || '—'}</td>
+                      <td style={{ fontSize: 13, fontWeight: 500 }}>{l.production_lines?.name || '—'}</td>
                       <td>
                         <button className="btn btn-danger btn-sm" onClick={() => setDeleting(l)}>Elimina</button>
                       </td>
