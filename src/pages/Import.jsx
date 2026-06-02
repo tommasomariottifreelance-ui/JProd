@@ -29,8 +29,10 @@ export default function Import() {
       const data = XLSX.utils.sheet_to_json(ws, { defval: null })
       const mapped = data.map((r, i) => ({
         _row: i + 2,
-        order_code: r['Nr. ordine produzione'] ?? r['Codice Commessa Produzione'],
-        product: r['Descrizione articolo'] ?? r['Descrizione Commessa Produttiva'],
+        order_code: r['Nr. ordine produzione'],
+        commessa_code: r['Codice Commessa Produzione'] ?? null,
+        order_description: r['Descrizione Commessa Produttiva'] ?? null,
+        product: r['Descrizione articolo'],
         brand_name: r['Marchio'],
         collection: r['Collezione'],
         reference_nr: r['Nr. Rif.'],
@@ -43,6 +45,7 @@ export default function Import() {
         quantity: parseInt(r['Quantità di input']) || 0,
         quantity_done: parseInt(r['Qtà Finita']) || 0,
         quantity_remaining: parseInt(r['Qtà Totale']) || 0,
+        listino: r['Listino Articolo'] ? parseFloat(r['Listino Articolo']) : null,
       }))
 
       // Validation
@@ -120,6 +123,8 @@ export default function Import() {
       // Payload ordine — senza quantity_remaining (calcolata dalla VIEW)
       const payload = {
         order_code: row.order_code,
+        commessa_code: row.commessa_code,
+        order_description: row.order_description,
         product: row.product,
         brand_id,
         product_id,
@@ -134,6 +139,13 @@ export default function Import() {
         quantity: row.quantity,
         quantity_done: row.quantity_done,
         status,
+      }
+
+      // Aggiorna selling_price del prodotto se presente nel listino Excel
+      if (product_id && row.listino && row.listino > 0) {
+        await supabase.from('products')
+          .update({ selling_price: row.listino })
+          .eq('id', product_id)
       }
 
       // Upsert: aggiorna se esiste, inserisce se nuovo
