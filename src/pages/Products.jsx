@@ -108,8 +108,8 @@ export default function Products() {
               <table>
                 <thead>
                   <tr>
-                    <th>Nome prodotto</th>
                     <th>Codice Articolo</th>
+                    <th>Nome prodotto</th>
                     <th>Brand</th>
                     <th>Tempo/pz (min)</th>
                     <th>Prezzo vendita (€/pz)</th>
@@ -124,16 +124,16 @@ export default function Products() {
                       {isEditing(p) ? (
                         <>
                           <td>
-                            <input className="form-input" value={editForm.name}
-                              onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
-                              onClick={e => e.stopPropagation()}
-                              style={{ padding: '4px 8px', fontSize: 13 }} />
-                          </td>
-                          <td>
                             <input className="form-input" value={editForm.sku}
                               onChange={e => setEditForm(f => ({ ...f, sku: e.target.value }))}
                               onClick={e => e.stopPropagation()}
-                              placeholder="es. ART-001"
+                              placeholder="es. 04000001"
+                              style={{ padding: '4px 8px', fontSize: 13 }} />
+                          </td>
+                          <td>
+                            <input className="form-input" value={editForm.name}
+                              onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                              onClick={e => e.stopPropagation()}
                               style={{ padding: '4px 8px', fontSize: 13 }} />
                           </td>
                           <td><span className="text-sm text-muted">{p.brands?.name ?? '—'}</span></td>
@@ -164,11 +164,11 @@ export default function Products() {
                         </>
                       ) : (
                         <>
+                          <td><span className="mono" style={{ fontWeight: 600 }}>{p.sku || '—'}</span></td>
                           <td className="font-medium">
                             {p.name}
                             {p._fromOrders && <span className="text-xs text-muted" style={{ marginLeft: 8 }}>da ordini</span>}
                           </td>
-                          <td><span className="mono">{p.sku || '—'}</span></td>
                           <td>{p.brands?.name ?? '—'}</td>
                           <td>{p.time_per_piece ? `${p.time_per_piece} min` : '—'}</td>
                           <td>{p.selling_price ? `€ ${p.selling_price}` : '—'}</td>

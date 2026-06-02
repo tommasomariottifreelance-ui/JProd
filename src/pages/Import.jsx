@@ -110,39 +110,36 @@ export default function Import() {
         }
       }
 
-      // Cerca o crea prodotto — popola sku da Nr. Articolo Excel
+      // Cerca o crea prodotto — SKU è la chiave univoca, nome è descrizione
       let product_id = null
-      if (row.product) {
-        // Prima cerca per SKU (più preciso)
+      if (row.sku || row.product) {
         let prod = null
+
+        // 1. Cerca per SKU (chiave univoca)
         if (row.sku) {
           const { data: bysku } = await supabase
-            .from('products').select('id, sku')
-            .ilike('sku', row.sku.trim())
+            .from('products').select('id, sku, name')
+            .eq('sku', row.sku.toString().trim())
+            .eq('client_id', client_id)
             .maybeSingle()
           prod = bysku
         }
-        // Fallback: cerca per nome
-        if (!prod) {
-          const { data: byname } = await supabase
-            .from('products').select('id, sku')
-            .ilike('name', row.product.trim())
-            .maybeSingle()
-          prod = byname
-        }
+
         if (prod) {
           product_id = prod.id
-          // Aggiorna sku se mancante
-          if (!prod.sku && row.sku) {
-            await supabase.from('products').update({ sku: row.sku }).eq('id', prod.id)
+          // Aggiorna nome se è cambiato
+          if (row.product && prod.name !== row.product.trim()) {
+            await supabase.from('products')
+              .update({ name: row.product.trim() })
+              .eq('id', prod.id)
           }
         } else {
-          // Crea prodotto con sku e listino
+          // Prodotto non trovato → crea nuovo con SKU come identificatore
           const { data: newprod } = await supabase
             .from('products')
             .insert({
-              name: row.product.trim(),
-              sku: row.sku ?? null,
+              sku: row.sku ? row.sku.toString().trim() : null,
+              name: row.product ? row.product.trim() : row.sku,
               selling_price: row.listino ?? null,
               brand_id,
               client_id,
@@ -159,6 +156,7 @@ export default function Import() {
         commessa_code: row.commessa_code,
         order_description: row.order_description,
         product: row.product,
+        sku: row.sku ? row.sku.toString().trim() : null,
         brand_id,
         product_id,
         client_id,
