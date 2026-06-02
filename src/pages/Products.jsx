@@ -109,7 +109,7 @@ export default function Products() {
                 <thead>
                   <tr>
                     <th>Nome prodotto</th>
-                    <th>SKU</th>
+                    <th>Codice Articolo</th>
                     <th>Brand</th>
                     <th>Tempo/pz (min)</th>
                     <th>Prezzo vendita (€/pz)</th>

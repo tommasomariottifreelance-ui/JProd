@@ -456,6 +456,9 @@ function TabOrders() {
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} />
                   </th>
                   <th>Ordine</th>
+                  <th>Commessa</th>
+                  <th>Desc. Commessa</th>
+                  <th>Cod. Articolo</th>
                   <th>Prodotto</th>
                   <th>Brand</th>
                   <th>Collezione</th>
@@ -471,7 +474,12 @@ function TabOrders() {
                   <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
                     <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} /></td>
                     <td><span className="mono">{o.order_code}</span></td>
-                    <td style={{ maxWidth: 200 }}>
+                    <td><span className="mono" style={{ fontSize: 11 }}>{o.order_description ? o.order_description.substring(0,20) : '—'}</span></td>
+                    <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span className="text-sm text-muted">{o.order_description || '—'}</span>
+                    </td>
+                    <td><span className="mono">{o.color_code || '—'}</span></td>
+                    <td style={{ maxWidth: 160 }}>
                       <div className="font-medium" style={{ fontSize: 13 }}>{o.product || '—'}</div>
                       {o.collection && <div className="text-xs text-muted">{o.collection}</div>}
                     </td>

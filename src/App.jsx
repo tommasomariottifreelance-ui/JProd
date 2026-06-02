@@ -10,6 +10,7 @@ import Import from './pages/Import'
 import Lines from './pages/Lines'
 import Brands from './pages/Brands'
 import Products from './pages/Products'
+import CompanySettings from './pages/CompanySettings'
 
 function Shell() {
   return (
@@ -25,6 +26,7 @@ function Shell() {
           <Route path="/lines"      element={<Lines />} />
           <Route path="/brands"     element={<Brands />} />
           <Route path="/products"   element={<Products />} />
+          <Route path="/company"    element={<CompanySettings />} />
           <Route path="*"           element={<Navigate to="/" />} />
         </Routes>
       </div>

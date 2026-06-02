@@ -109,7 +109,6 @@ export default function Brands() {
                     <th style={{ width: 36 }}><input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} /></th>
                     <th>Codice Cliente</th>
                     <th>Nome Cliente</th>
-                    <th>Priorità</th>
                     <th>Creato il</th>
                     <th></th>
                   </tr>
@@ -134,13 +133,6 @@ export default function Brands() {
                               placeholder="es. Pelletteria Fiorentina Srl"
                               style={{ padding: '4px 8px', fontSize: 13 }} />
                           </td>
-                          <td>
-                            <input className="form-input" type="number" value={editForm.priority}
-                              onChange={e => setEditForm(f => ({ ...f, priority: e.target.value }))}
-                              onClick={e => e.stopPropagation()}
-                              placeholder="es. 1"
-                              style={{ padding: '4px 8px', fontSize: 13, width: 80 }} />
-                          </td>
                           <td>{b.created_at ? new Date(b.created_at).toLocaleDateString('it-IT') : '—'}</td>
                           <td onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 6 }}>
@@ -156,7 +148,6 @@ export default function Brands() {
                           <td><input type="checkbox" checked={selected.has(b.id)} onChange={() => toggleOne(b.id)} style={{ cursor: 'pointer' }} /></td>
                           <td className="font-medium">{b.name}</td>
                           <td>{b.client_name ?? '—'}</td>
-                          <td>{b.priority ?? '—'}</td>
                           <td className="text-sm text-muted">
                             {b.created_at ? new Date(b.created_at).toLocaleDateString('it-IT') : '—'}
                           </td>

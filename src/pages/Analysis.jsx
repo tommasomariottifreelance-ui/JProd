@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
-} from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, CartesianGrid } from 'recharts'
 import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 
-const BRAND_COLORS = ['#1A5FA8','#4A9FD4','#7EC8E3','#2272C3','#0B3D7A','#A8BDD0']
+const BRAND_COLORS = ['#1A5FA8','#4A9FD4','#2272C3','#0B3D7A','#7EC8E3','#A8BDD0']
 const STATUS_LABELS = { planned: 'Pianificati', in_production: 'In produzione', completed: 'Completati', on_hold: 'In attesa' }
+const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+
+// Converte numero settimana e anno in mese
+function weekToMonth(week, year) {
+  const jan1 = new Date(year, 0, 1)
+  const d = new Date(jan1.getTime() + (week - 1) * 7 * 86400000)
+  return MONTHS[d.getMonth()]
+}
 
 function KpiCard({ label, value, sub, color = 'blue' }) {
   return (
@@ -28,7 +33,7 @@ export default function Analysis() {
     async function load() {
       const [{ data: o }, { data: l }] = await Promise.all([
         supabase.from('orders_with_totals').select('*'),
-        supabase.from('production_log').select('*, orders(order_code, product, brand_id, brands(name))').order('date')
+        supabase.from('production_log').select('date, produced_qt').order('date')
       ])
       setOrders(o || [])
       setLogs(l || [])
@@ -44,42 +49,53 @@ export default function Analysis() {
     </div>
   )
 
-  // ── KPI totali ──
-  const totalOrders   = orders.length
-  const totalPz       = orders.reduce((s, o) => s + (o.quantity || 0), 0)
-  const pzProdotti    = orders.reduce((s, o) => s + (o.quantity_produced || 0), 0)
-  const pzInProd      = orders.filter(o => o.status === 'in_production').reduce((s, o) => s + ((o.quantity || 0) - (o.quantity_produced || 0)), 0)
-  const pzDaPianif    = orders.filter(o => o.status === 'planned').reduce((s, o) => s + (o.quantity || 0), 0)
-  const ordiniInRitardo = orders.filter(o => o.due_date && new Date(o.due_date) < new Date() && o.status !== 'completed').length
+  // ── KPI ──
+  const totalOrders      = orders.length
+  const ordiniCompletati = orders.filter(o => o.status === 'completed').length
+  const totalPz          = orders.reduce((s, o) => s + (o.quantity || 0), 0)
+  const pzProdotti       = orders.reduce((s, o) => s + (o.quantity_produced || 0), 0)
+  const pzInProd         = orders.filter(o => o.status === 'in_production').reduce((s, o) => s + ((o.quantity||0)-(o.quantity_produced||0)), 0)
+  const pzDaPianif       = orders.filter(o => o.status === 'planned').reduce((s, o) => s + (o.quantity || 0), 0)
+  const ordiniInRitardo  = orders.filter(o => o.due_date && new Date(o.due_date) < new Date() && o.status !== 'completed').length
 
-  // ── Stato ordini per donut ──
+  // ── Stato ordini ──
   const byStatus = ['planned','in_production','completed','on_hold'].map(s => ({
     name: STATUS_LABELS[s],
     value: orders.filter(o => o.status === s).length,
     color: s === 'planned' ? '#1A5FA8' : s === 'in_production' ? '#1A9E6E' : s === 'completed' ? '#6B85A0' : '#D4820A'
   })).filter(s => s.value > 0)
 
-  // ── Settimane con brand scomposti ──
-  const weekBrandMap = {}
+  // ── Grafico settimane con brand affiancati (grouped) ──
   const brandSet = new Set()
+  const weekBrandMap = {}
   orders.forEach(o => {
     if (!o.week) return
-    const key = `W${o.week}`
-    if (!weekBrandMap[key]) weekBrandMap[key] = { week: key }
+    const month = weekToMonth(o.week, new Date().getFullYear())
+    const key = `W${o.week}\n${month}`
+    if (!weekBrandMap[key]) weekBrandMap[key] = { week: `W${o.week}`, label: `W${o.week} ${month}` }
     const brand = o.brand_name ?? 'N/D'
     brandSet.add(brand)
     weekBrandMap[key][brand] = (weekBrandMap[key][brand] || 0) + (o.quantity || 0)
   })
   const brands = [...brandSet]
   const weeklyData = Object.values(weekBrandMap)
-    .sort((a, b) => {
-      const wa = parseInt(a.week.replace('W',''))
-      const wb = parseInt(b.week.replace('W',''))
-      return wa - wb
-    })
+    .sort((a, b) => parseInt(a.week.replace('W','')) - parseInt(b.week.replace('W','')))
     .slice(-8)
 
-  // ── Performance per brand ──
+  // ── Grafico andamento pz prodotti per trimestre ──
+  const quarterMap = {}
+  logs.forEach(l => {
+    if (!l.date) return
+    const d    = new Date(l.date)
+    const q    = Math.ceil((d.getMonth() + 1) / 3)
+    const key  = `Q${q} ${d.getFullYear()}`
+    quarterMap[key] = (quarterMap[key] || 0) + (l.produced_qt || 0)
+  })
+  const quarterData = Object.entries(quarterMap)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([quarter, pz]) => ({ quarter, pz }))
+
+  // ── Brand perf ──
   const brandPerf = {}
   orders.forEach(o => {
     const b = o.brand_name ?? 'N/D'
@@ -90,20 +106,13 @@ export default function Analysis() {
   })
   const brandData = Object.values(brandPerf)
 
-  // ── Export ──
   const exportExcel = () => {
     const rows = orders.map(o => ({
-      'Nr. Ordine': o.order_code,
-      'Prodotto': o.product,
-      'Brand': o.brand_name ?? '',
-      'Collezione': o.collection ?? '',
-      'Linea': o.line_name ?? '',
-      'Stato': o.status,
-      'Quantità totale': o.quantity,
+      'Nr. Ordine': o.order_code, 'Prodotto': o.product,
+      'Brand': o.brand_name ?? '', 'Collezione': o.collection ?? '',
+      'Stato': o.status, 'Quantità totale': o.quantity,
       'Pz prodotti': o.quantity_produced ?? 0,
-      'Pz rimanenti': o.quantity_remaining ?? o.quantity,
-      'Avanzamento %': o.progress_pct ?? 0,
-      'Scadenza': o.due_date ?? '',
+      'Avanzamento %': o.progress_pct ?? 0, 'Scadenza': o.due_date ?? '',
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
@@ -124,62 +133,57 @@ export default function Analysis() {
       </div>
 
       <div className="page-content">
-        {/* KPI */}
         <div className="kpi-grid mb-6">
-          <KpiCard label="Ordini totali" value={totalOrders} color="blue" />
-          <KpiCard label="Pz totali" value={totalPz.toLocaleString('it-IT')} sub={`${pzProdotti.toLocaleString()} prodotti · ${pzInProd.toLocaleString()} in prod · ${pzDaPianif.toLocaleString()} da pianif.`} color="celeste" />
-          <KpiCard label="Avanzamento globale" value={`${totalPz > 0 ? Math.round(pzProdotti/totalPz*100) : 0}%`} sub={`${pzProdotti.toLocaleString()} / ${totalPz.toLocaleString()} pz`} color="success" />
+          <KpiCard label="Ordini completati" value={`${ordiniCompletati} / ${totalOrders}`}
+            sub={`${Math.round(ordiniCompletati/Math.max(totalOrders,1)*100)}% del totale`} color="success" />
+          <KpiCard label="Pz totali" value={totalPz.toLocaleString('it-IT')}
+            sub={`${pzProdotti.toLocaleString()} prodotti · ${pzInProd.toLocaleString()} in prod · ${pzDaPianif.toLocaleString()} da pianif.`} color="celeste" />
+          <KpiCard label="Avanzamento globale"
+            value={`${totalPz > 0 ? Math.round(pzProdotti/totalPz*100) : 0}%`}
+            sub={`${pzProdotti.toLocaleString()} / ${totalPz.toLocaleString()} pz`} color="blue" />
           <KpiCard label="Ordini in ritardo" value={ordiniInRitardo} color="warning" />
         </div>
 
-        {/* Grafici riga 1 */}
         <div className="charts-grid mb-4">
+          {/* Grafico settimane grouped per brand */}
           <div className="card">
             <div className="card-header">
               <div className="card-title">Quantità per settimana per brand</div>
-              <div className="card-sub">Ultime 8 settimane</div>
+              <div className="card-sub">Ultime 8 settimane — barre affiancate per brand</div>
             </div>
             <div className="card-body">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={weeklyData} barSize={16}>
-                  <XAxis dataKey="week" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                <BarChart data={weeklyData} barSize={12} barGap={2} barCategoryGap="25%">
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={{ borderRadius: 8, border: 'none', boxShadow: '0 4px 16px rgba(0,0,0,0.1)', fontSize: 13 }} />
+                  <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   {brands.map((b, i) => (
-                    <Bar key={b} dataKey={b} stackId="a"
-                      fill={BRAND_COLORS[i % BRAND_COLORS.length]}
-                      radius={i === brands.length - 1 ? [4,4,0,0] : [0,0,0,0]}
-                      name={b} />
+                    <Bar key={b} dataKey={b} fill={BRAND_COLORS[i % BRAND_COLORS.length]}
+                      radius={[3,3,0,0]} name={b} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
+          {/* Grafico andamento pz prodotti per trimestre */}
           <div className="card">
             <div className="card-header">
-              <div className="card-title">Distribuzione stato ordini</div>
+              <div className="card-title">Andamento pz prodotti per trimestre</div>
+              <div className="card-sub">Totale pezzi registrati nel log di produzione</div>
             </div>
-            <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-              <ResponsiveContainer width="50%" height={180}>
-                <PieChart>
-                  <Pie data={byStatus} cx="50%" cy="50%" innerRadius={50} outerRadius={75}
-                    dataKey="value" paddingAngle={3}>
-                    {byStatus.map((e, i) => <Cell key={i} fill={e.color} />)}
-                  </Pie>
+            <div className="card-body">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={quarterData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-100)" />
+                  <XAxis dataKey="quarter" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }} />
-                </PieChart>
+                  <Line type="monotone" dataKey="pz" stroke="var(--blue)" strokeWidth={2.5}
+                    dot={{ fill: 'var(--blue)', r: 5 }} name="Pz prodotti" />
+                </LineChart>
               </ResponsiveContainer>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {byStatus.map(s => (
-                  <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 3, background: s.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 13, color: 'var(--gray-700)', flex: 1 }}>{s.name}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{s.value}</span>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         </div>
@@ -193,12 +197,8 @@ export default function Analysis() {
             <table>
               <thead>
                 <tr>
-                  <th>Brand</th>
-                  <th>Totale ordini</th>
-                  <th>Pianificati</th>
-                  <th>In produzione</th>
-                  <th>Completati</th>
-                  <th>Pz prodotti</th>
+                  <th>Brand</th><th>Totale ordini</th><th>Pianificati</th>
+                  <th>In produzione</th><th>Completati</th><th>Pz prodotti</th>
                 </tr>
               </thead>
               <tbody>
