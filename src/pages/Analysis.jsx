@@ -82,18 +82,20 @@ export default function Analysis() {
     .sort((a, b) => parseInt(a.week.replace('W','')) - parseInt(b.week.replace('W','')))
     .slice(-8)
 
-  // ── Grafico andamento pz prodotti per trimestre ──
-  const quarterMap = {}
+  // ── Grafico andamento pz prodotti per mese (anno corrente) ──
+  const currentYear = new Date().getFullYear()
+  const monthMap = {}
+  // Inizializza tutti i 12 mesi a 0
+  MONTHS.forEach((m, i) => { monthMap[i] = 0 })
   logs.forEach(l => {
     if (!l.date) return
-    const d    = new Date(l.date)
-    const q    = Math.ceil((d.getMonth() + 1) / 3)
-    const key  = `Q${q} ${d.getFullYear()}`
-    quarterMap[key] = (quarterMap[key] || 0) + (l.produced_qt || 0)
+    const d = new Date(l.date)
+    if (d.getFullYear() !== currentYear) return
+    monthMap[d.getMonth()] = (monthMap[d.getMonth()] || 0) + (l.produced_qt || 0)
   })
-  const quarterData = Object.entries(quarterMap)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([quarter, pz]) => ({ quarter, pz }))
+  const monthlyData = Object.entries(monthMap)
+    .map(([idx, pz]) => ({ month: MONTHS[parseInt(idx)], pz, idx: parseInt(idx) }))
+    .sort((a, b) => a.idx - b.idx)
 
   // ── Brand perf ──
   const brandPerf = {}
@@ -170,14 +172,14 @@ export default function Analysis() {
           {/* Grafico andamento pz prodotti per trimestre */}
           <div className="card">
             <div className="card-header">
-              <div className="card-title">Andamento pz prodotti per trimestre</div>
-              <div className="card-sub">Totale pezzi registrati nel log di produzione</div>
+              <div className="card-title">Andamento pz prodotti per mese</div>
+              <div className="card-sub">Anno {currentYear} — pz per mese</div>
             </div>
             <div className="card-body">
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={quarterData}>
+                <LineChart data={monthlyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--gray-100)" />
-                  <XAxis dataKey="quarter" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }} />
                   <Line type="monotone" dataKey="pz" stroke="var(--blue)" strokeWidth={2.5}

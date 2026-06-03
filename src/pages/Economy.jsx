@@ -193,98 +193,175 @@ function Consuntivo({ orders, lines }) {
 }
 
 // ─── TAB FORECAST ────────────────────────────────────────────
-function Forecast({ orders }) {
-  const data = orders.filter(o => o.status !== 'completed').map(o => ({
-    ...o,
-    forecastCosto:  parseFloat(o.forecast_costo || 0),
-    forecastRicavo: parseFloat(o.forecast_ricavo || 0),
-    get forecastMargine() { return this.forecastRicavo - this.forecastCosto },
-    get forecastMarginePct() { return this.forecastRicavo > 0 ? (this.forecastMargine / this.forecastRicavo) * 100 : null }
-  }))
+// Logica: tutti gli ordini aperti (planned + in_production) con quantità rimanente
+// Costo atteso = pz_rimanenti × (time_per_piece/60) × hourly_cost_medio linee compatibili
+// Ricavo atteso = pz_rimanenti × selling_price
+function Forecast({ orders, lines }) {
+  const currentYear = new Date().getFullYear()
 
-  const totCosto   = data.reduce((s, o) => s + o.forecastCosto, 0)
-  const totRicavo  = data.reduce((s, o) => s + o.forecastRicavo, 0)
-  const totMargine = totRicavo - totCosto
+  // Costo orario medio tra le linee attive (approssimazione per ordini non pianificati)
+  const avgHourlyCost = lines.length > 0
+    ? lines.filter(l => l.hourly_cost).reduce((s, l) => s + parseFloat(l.hourly_cost || 0), 0) / lines.filter(l => l.hourly_cost).length
+    : 0
+
+  const data = orders
+    .filter(o => o.status !== 'completed')
+    .filter(o => {
+      // Includi solo ordini con scadenza entro fine anno corrente (o senza scadenza)
+      if (!o.due_date) return true
+      return new Date(o.due_date).getFullYear() <= currentYear
+    })
+    .map(o => {
+      const tpp      = parseFloat(o.time_per_piece || 0)
+      const sp       = parseFloat(o.selling_price || 0)
+      const pzRim    = o.quantity_remaining ?? (o.quantity - (o.quantity_produced || 0))
+      // Usa hourly_cost della linea assegnata se disponibile, altrimenti media
+      const hc       = parseFloat(o.hourly_cost || avgHourlyCost || 0)
+      const forecastCosto  = pzRim * (tpp / 60) * hc
+      const forecastRicavo = pzRim * sp
+      const forecastMargine = forecastRicavo - forecastCosto
+      const forecastMarginePct = forecastRicavo > 0 ? (forecastMargine / forecastRicavo) * 100 : null
+      return { ...o, pzRim, forecastCosto, forecastRicavo, forecastMargine, forecastMarginePct, tpp, sp, hc }
+    })
+
+  const totCosto      = data.reduce((s, o) => s + o.forecastCosto, 0)
+  const totRicavo     = data.reduce((s, o) => s + o.forecastRicavo, 0)
+  const totMargine    = totRicavo - totCosto
   const totMarginePct = totRicavo > 0 ? (totMargine / totRicavo) * 100 : 0
+  const missingCount  = data.filter(o => !o.sp || !o.tpp).length
 
-  const missingCount = data.filter(o => !o.selling_price || !o.time_per_piece || o.forecast_costo === 0).length
-
+  // Per brand
   const brandMap = {}
   data.forEach(o => {
     const b = o.brand_name ?? 'N/D'
-    if (!brandMap[b]) brandMap[b] = { brand: b, costo: 0, ricavo: 0, margine: 0, ordini: 0 }
+    if (!brandMap[b]) brandMap[b] = { brand: b, costo: 0, ricavo: 0, margine: 0 }
     brandMap[b].costo   += o.forecastCosto
     brandMap[b].ricavo  += o.forecastRicavo
     brandMap[b].margine += o.forecastMargine
-    brandMap[b].ordini++
   })
   const brandData = Object.values(brandMap).map(b => ({
     ...b, costo: Math.round(b.costo), ricavo: Math.round(b.ricavo), margine: Math.round(b.margine)
+  }))
+
+  // Per mese (scadenza ordini)
+  const MONTHS = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+  const monthMap = {}
+  MONTHS.forEach((m, i) => { monthMap[i] = { month: m, ricavo: 0, costo: 0, margine: 0 } })
+  data.forEach(o => {
+    if (!o.due_date) return
+    const m = new Date(o.due_date).getMonth()
+    monthMap[m].ricavo  += o.forecastRicavo
+    monthMap[m].costo   += o.forecastCosto
+    monthMap[m].margine += o.forecastMargine
+  })
+  const monthData = Object.values(monthMap).map(m => ({
+    ...m, ricavo: Math.round(m.ricavo), costo: Math.round(m.costo), margine: Math.round(m.margine)
   }))
 
   return (
     <div>
       <div style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--ice-light)', borderRadius: 10, border: '1px solid var(--ice)' }}>
         <span style={{ fontSize: 13, color: 'var(--blue)' }}>
-          📊 Il Forecast è basato sulle assegnazioni di pianificazione ({orders.filter(o=>o.quantity_assigned>0).length} ordini pianificati).
-          Assegna gli ordini nella tab Pianificazione per vedere le previsioni complete.
+          📊 Forecast basato su tutti gli ordini aperti con scadenza entro il {currentYear}.
+          Costo calcolato su quantità rimanente × tempo/pz × costo orario linea.
+          {avgHourlyCost > 0 && ` Costo orario medio linee: €${fmt(avgHourlyCost)}/ora.`}
         </span>
       </div>
       <MissingDataWarning count={missingCount} />
 
       <div className="kpi-grid mb-6">
-        <KpiCard label="Costo previsto" value={`€ ${fmt(totCosto)}`} color="warning"
-          sub="pz pianificati × tempo/pz × costo orario linea" />
-        <KpiCard label="Ricavo previsto" value={`€ ${fmt(totRicavo)}`} color="celeste"
-          sub="pz pianificati × prezzo vendita" />
-        <KpiCard label="Margine previsto" value={`€ ${fmt(totMargine)}`}
-          color={totMargine >= 0 ? 'success' : 'warning'} />
-        <KpiCard label="Margine % previsto" value={`${fmt(totMarginePct)}%`}
-          color={totMarginePct >= 30 ? 'success' : totMarginePct >= 10 ? 'celeste' : 'warning'} />
+        <KpiCard label={`Ordini aperti (${currentYear})`} value={data.length}
+          sub={`${data.reduce((s,o)=>s+o.pzRim,0).toLocaleString()} pz rimanenti`} color="celeste" />
+        <KpiCard label="Ricavo atteso" value={`€ ${fmt(totRicavo)}`} color="blue"
+          sub="pz rimanenti × prezzo vendita" />
+        <KpiCard label="Costo atteso" value={`€ ${fmt(totCosto)}`} color="warning"
+          sub="pz rimanenti × tempo/pz × costo orario" />
+        <KpiCard label="Margine atteso" value={`€ ${fmt(totMargine)}`}
+          color={totMargine >= 0 ? 'success' : 'warning'}
+          sub={`${fmt(totMarginePct)}% sul ricavo`} />
       </div>
 
-      <div className="card mb-4">
-        <div className="card-header"><div className="card-title">Forecast per brand</div></div>
-        <div className="card-body">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={brandData} barSize={18} barGap={4}>
-              <XAxis dataKey="brand" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-              <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }} formatter={v => [`€ ${fmt(v)}`]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="costo"   fill="#D4820A" name="Costo prev."  radius={[4,4,0,0]} />
-              <Bar dataKey="ricavo"  fill="#1A5FA8" name="Ricavo prev." radius={[4,4,0,0]} />
-              <Bar dataKey="margine" fill="#1A9E6E" name="Margine prev." radius={[4,4,0,0]} />
-            </BarChart>
-          </ResponsiveContainer>
+      <div className="charts-grid mb-4">
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Ricavo e costo atteso per mese</div>
+            <div className="card-sub">Per data scadenza ordini — {currentYear}</div>
+          </div>
+          <div className="card-body">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={monthData} barSize={14} barGap={2}>
+                <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 12 }} formatter={v => [`€ ${fmt(v)}`]} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="ricavo"  fill="#1A5FA8" name="Ricavo" radius={[3,3,0,0]} />
+                <Bar dataKey="costo"   fill="#D4820A" name="Costo"  radius={[3,3,0,0]} />
+                <Bar dataKey="margine" fill="#1A9E6E" name="Margine" radius={[3,3,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><div className="card-title">Forecast per brand</div></div>
+          <div className="card-body">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={brandData} barSize={14} barGap={2}>
+                <XAxis dataKey="brand" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }} formatter={v => [`€ ${fmt(v)}`]} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="ricavo"  fill="#1A5FA8" name="Ricavo" radius={[4,4,0,0]} />
+                <Bar dataKey="costo"   fill="#D4820A" name="Costo"  radius={[4,4,0,0]} />
+                <Bar dataKey="margine" fill="#1A9E6E" name="Margine" radius={[4,4,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header" style={{ padding: '20px 24px 16px' }}>
           <div className="card-title">Dettaglio forecast per ordine</div>
-          <div className="card-sub">Ordini con assegnazione di pianificazione</div>
+          <div className="card-sub">Ordini aperti con scadenza entro il {currentYear}</div>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Ordine</th><th>Prodotto</th><th>Brand</th>
-                <th>Pz pianificati</th><th>Costo prev. (€)</th>
-                <th>Ricavo prev. (€)</th><th>Margine prev.</th>
+                <th>Ordine</th><th>Prodotto</th><th>Brand</th><th>Scadenza</th>
+                <th>Pz rimanenti</th><th>Ricavo atteso</th><th>Costo atteso</th><th>Margine</th>
               </tr>
             </thead>
             <tbody>
-              {data.filter(o => o.quantity_assigned > 0).sort((a,b) => b.forecastMargine - a.forecastMargine).map(o => (
+              {data.sort((a,b) => {
+                if (!a.due_date) return 1
+                if (!b.due_date) return -1
+                return new Date(a.due_date) - new Date(b.due_date)
+              }).map(o => (
                 <tr key={o.id}>
                   <td><span className="mono">{o.order_code}</span></td>
                   <td className="font-medium">{o.product}</td>
                   <td>{o.brand_name ?? '—'}</td>
-                  <td style={{ fontWeight: 600 }}>{(o.quantity_assigned||0).toLocaleString()}</td>
-                  <td style={{ color: 'var(--warning)' }}>{o.forecastCosto > 0 ? `€ ${fmt(o.forecastCosto)}` : '—'}</td>
-                  <td style={{ color: 'var(--blue)' }}>{o.forecastRicavo > 0 ? `€ ${fmt(o.forecastRicavo)}` : '—'}</td>
-                  <td style={{ fontWeight: 600, color: o.forecastMargine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                    {o.forecastCosto > 0 && o.forecastRicavo > 0 ? `€ ${fmt(o.forecastMargine)}` : '—'}
+                  <td style={{ fontSize: 12,
+                    color: o.due_date && new Date(o.due_date) < new Date() ? 'var(--danger)' : 'var(--gray-700)' }}>
+                    {o.due_date ? new Date(o.due_date).toLocaleDateString('it-IT') : '—'}
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{o.pzRim.toLocaleString()}</td>
+                  <td style={{ color: 'var(--blue)', fontWeight: 500 }}>
+                    {o.forecastRicavo > 0 ? `€ ${fmt(o.forecastRicavo)}` : '—'}
+                  </td>
+                  <td style={{ color: 'var(--warning)' }}>
+                    {o.forecastCosto > 0 ? `€ ${fmt(o.forecastCosto)}` : '—'}
+                  </td>
+                  <td style={{ fontWeight: 600,
+                    color: o.forecastMargine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {o.forecastRicavo > 0 ? `€ ${fmt(o.forecastMargine)}` : '—'}
+                    {o.forecastMarginePct !== null && o.forecastRicavo > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--gray-500)', marginLeft: 4 }}>
+                        ({fmt(o.forecastMarginePct)}%)
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

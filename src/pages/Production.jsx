@@ -386,7 +386,7 @@ function TabOrders() {
   const generateAutoPlan = async () => {
     setGenerating(true)
     try {
-      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id)
+      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id, saturationCap)
       setDraftPlan(result)
     } catch(e) {
       console.error(e)
@@ -494,6 +494,7 @@ function TabOrders() {
                   <th>Scadenza</th>
                   <th>Stato</th>
                   <th>Pz fatti / Totale</th>
+                  <th>Pianificati / Totale</th>
                   <th></th>
                 </tr>
               </thead>
@@ -529,9 +530,15 @@ function TabOrders() {
                       </span>
                       <span className="text-muted" style={{ fontSize: 12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
                     </td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--success)', fontSize: 13 }}>
+                        {(o.quantity_assigned || 0).toLocaleString('it-IT')}
+                      </span>
+                      <span className="text-muted" style={{ fontSize: 12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
+                    </td>
 
                     <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         {o.status !== 'completed' && (
                           <button className="btn btn-primary btn-sm" onClick={() => setAdvancing(o)}>Avanza</button>
                         )}
@@ -583,7 +590,7 @@ function TabOrders() {
 }
 
 // ─── ALGORITMO PIANIFICAZIONE ────────────────────────────────
-async function generatePlan(orders, lines, existingAssignments, weeks, clientId) {
+async function generatePlan(orders, lines, existingAssignments, weeks, clientId, saturationPct = 85) {
   // 1. Carica compatibilità linea-prodotto
   const { supabase } = await import('../lib/supabase')
   const { data: compat } = await supabase
@@ -623,6 +630,8 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId)
     })
 
   // 4. Algoritmo greedy: satura una linea alla volta
+  // Cap all'85% della capacità (standard industriale — lascia margine per imprevisti)
+  const SATURATION_CAP = saturationPct / 100
   const plan = [] // { order_id, line_id, week_number, year, quantity_assigned }
   const warnings = []
 
@@ -660,8 +669,8 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId)
         const capLeft = lineCapacity[key] || 0
         if (capLeft <= 0) continue
 
-        // Quanti pz possiamo fare con la capacità residua?
-        const maxPz = Math.floor(capLeft / tpp)
+        // Quanti pz possiamo fare con la capacità residua (applicando cap saturazione)?
+        const maxPz = Math.floor((capLeft * SATURATION_CAP) / tpp)
         if (maxPz <= 0) continue
 
         const pzThisWeek = Math.min(maxPz, remaining)
@@ -705,6 +714,7 @@ function TabPlanning() {
   const [activeCell, setActiveCell] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [draftPlan, setDraftPlan]   = useState(null) // { plan, warnings }
+  const [saturationCap, setSaturationCap] = useState(85)
 
   const weeks = view === 'week' ? getWeeksRange(0, 1) : getWeeksRange(0, 4)
 
@@ -730,7 +740,7 @@ function TabPlanning() {
   const generateAutoPlan = async () => {
     setGenerating(true)
     try {
-      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id)
+      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id, saturationCap)
       setDraftPlan(result)
     } catch(e) {
       console.error(e)
@@ -807,10 +817,22 @@ function TabPlanning() {
         <button className={`filter-chip ${view === '4weeks' ? 'active' : ''}`} onClick={() => setView('4weeks')}>
           4 settimane
         </button>
-        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }}
-          onClick={generateAutoPlan} disabled={generating}>
-          {generating ? '⟳ Generando...' : '⚡ Genera piano automatico'}
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="text-xs text-muted">Saturazione max:</span>
+          <select className="form-select" value={saturationCap}
+            onChange={e => setSaturationCap(parseInt(e.target.value))}
+            style={{ width: 90, padding: '5px 8px', fontSize: 13 }}>
+            <option value={75}>75%</option>
+            <option value={80}>80%</option>
+            <option value={85}>85%</option>
+            <option value={90}>90%</option>
+            <option value={95}>95%</option>
+          </select>
+          <button className="btn btn-primary btn-sm"
+            onClick={generateAutoPlan} disabled={generating}>
+            {generating ? '⟳ Generando...' : '⚡ Genera piano automatico'}
+          </button>
+        </div>
       </div>
 
       {loading ? (
