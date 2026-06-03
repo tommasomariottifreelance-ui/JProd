@@ -383,6 +383,33 @@ function TabOrders() {
 
   useEffect(() => { load() }, [load])
 
+  const generateAutoPlan = async () => {
+    setGenerating(true)
+    try {
+      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id)
+      setDraftPlan(result)
+    } catch(e) {
+      console.error(e)
+    }
+    setGenerating(false)
+  }
+
+  const approvePlan = async () => {
+    if (!draftPlan) return
+    for (const item of draftPlan.plan) {
+      await supabase.from('order_line_assignments').insert({
+        order_id: item.order_id,
+        line_id: item.line_id,
+        week_number: item.week_number,
+        year: item.year,
+        quantity_assigned: item.quantity_assigned,
+        client_id: profile?.client_id,
+      })
+    }
+    setDraftPlan(null)
+    load()
+  }
+
   const filtered = orders.filter(o => {
     if (status !== 'all' && o.status !== status) return false
     if (brand !== 'all' && o.brand_name !== brand) return false
@@ -555,6 +582,118 @@ function TabOrders() {
   )
 }
 
+// ─── ALGORITMO PIANIFICAZIONE ────────────────────────────────
+async function generatePlan(orders, lines, existingAssignments, weeks, clientId) {
+  // 1. Carica compatibilità linea-prodotto
+  const { supabase } = await import('../lib/supabase')
+  const { data: compat } = await supabase
+    .from('line_product_compatibility').select('line_id, product_id')
+  const compatMap = {} // { product_id: Set<line_id> }
+  ;(compat || []).forEach(c => {
+    if (!compatMap[c.product_id]) compatMap[c.product_id] = new Set()
+    compatMap[c.product_id].add(c.line_id)
+  })
+
+  // 2. Calcola capacità residua per linea/settimana
+  // capacità = available_hours_per_day * 60 * efficiency * 5 giorni
+  const lineCapacity = {} // { lineId_weekKey: minuti_residui }
+  lines.forEach(l => {
+    const cap = Math.round((l.available_hours_per_day || 0) * 60 * (l.efficiency || 1) * 5)
+    weeks.forEach(w => {
+      const key = `${l.id}_${w.year}_${w.week}`
+      const used = existingAssignments
+        .filter(a => a.line_id === l.id && a.week_number === w.week && a.year === w.year)
+        .reduce((s, a) => {
+          const order = orders.find(o => o.id === a.order_id)
+          const tpp = parseFloat(order?.time_per_piece || 0)
+          return s + (a.quantity_assigned || 0) * tpp
+        }, 0)
+      lineCapacity[key] = cap - used
+    })
+  })
+
+  // 3. Ordina ordini per scadenza (prima chi scade prima)
+  const toplan = orders
+    .filter(o => o.status === 'planned' || (o.status === 'in_production' && o.quantity_remaining > 0))
+    .filter(o => o.quantity_remaining > 0)
+    .sort((a, b) => {
+      if (!a.due_date) return 1
+      if (!b.due_date) return -1
+      return new Date(a.due_date) - new Date(b.due_date)
+    })
+
+  // 4. Algoritmo greedy: satura una linea alla volta
+  const plan = [] // { order_id, line_id, week_number, year, quantity_assigned }
+  const warnings = []
+
+  toplan.forEach(order => {
+    const tpp = parseFloat(order.time_per_piece || 0)
+    if (tpp === 0) {
+      warnings.push(`${order.order_code}: time_per_piece non configurato, saltato`)
+      return
+    }
+
+    let remaining = order.quantity_remaining || order.quantity
+    const compatLines = lines.filter(l =>
+      compatMap[order.product_id]?.has(l.id)
+    )
+
+    if (compatLines.length === 0) {
+      warnings.push(`${order.order_code}: nessuna linea compatibile con ${order.product}`)
+      return
+    }
+
+    // Per ogni settimana, satura la prima linea compatibile disponibile
+    for (const week of weeks) {
+      if (remaining <= 0) break
+
+      // Ordina linee per capacità residua decrescente (satura prima quella più libera)
+      const sortedLines = [...compatLines].sort((a, b) => {
+        const capA = lineCapacity[`${a.id}_${week.year}_${week.week}`] || 0
+        const capB = lineCapacity[`${b.id}_${week.year}_${week.week}`] || 0
+        return capB - capA
+      })
+
+      for (const line of sortedLines) {
+        if (remaining <= 0) break
+        const key = `${line.id}_${week.year}_${week.week}`
+        const capLeft = lineCapacity[key] || 0
+        if (capLeft <= 0) continue
+
+        // Quanti pz possiamo fare con la capacità residua?
+        const maxPz = Math.floor(capLeft / tpp)
+        if (maxPz <= 0) continue
+
+        const pzThisWeek = Math.min(maxPz, remaining)
+        const minutesUsed = pzThisWeek * tpp
+
+        plan.push({
+          order_id: order.id,
+          line_id: line.id,
+          week_number: week.week,
+          year: week.year,
+          quantity_assigned: pzThisWeek,
+          // Metadata per la preview
+          _order_code: order.order_code,
+          _product: order.product,
+          _line_name: line.name,
+          _due_date: order.due_date,
+        })
+
+        lineCapacity[key] -= minutesUsed
+        remaining -= pzThisWeek
+        break // Satura una linea alla volta per settimana
+      }
+    }
+
+    if (remaining > 0) {
+      warnings.push(`${order.order_code}: ${remaining} pz non pianificabili (capacità insufficiente nelle settimane disponibili)`)
+    }
+  })
+
+  return { plan, warnings }
+}
+
 // ─── TAB: PIANIFICAZIONE ─────────────────────────────────────
 function TabPlanning() {
   const { profile } = useAuth()
@@ -564,6 +703,8 @@ function TabPlanning() {
   const [loading, setLoading]       = useState(true)
   const [view, setView]             = useState('week') // 'week' | '4weeks'
   const [activeCell, setActiveCell] = useState(null)
+  const [generating, setGenerating] = useState(false)
+  const [draftPlan, setDraftPlan]   = useState(null) // { plan, warnings }
 
   const weeks = view === 'week' ? getWeeksRange(0, 1) : getWeeksRange(0, 4)
 
@@ -585,6 +726,33 @@ function TabPlanning() {
   }, [view])
 
   useEffect(() => { load() }, [load])
+
+  const generateAutoPlan = async () => {
+    setGenerating(true)
+    try {
+      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id)
+      setDraftPlan(result)
+    } catch(e) {
+      console.error(e)
+    }
+    setGenerating(false)
+  }
+
+  const approvePlan = async () => {
+    if (!draftPlan) return
+    for (const item of draftPlan.plan) {
+      await supabase.from('order_line_assignments').insert({
+        order_id: item.order_id,
+        line_id: item.line_id,
+        week_number: item.week_number,
+        year: item.year,
+        quantity_assigned: item.quantity_assigned,
+        client_id: profile?.client_id,
+      })
+    }
+    setDraftPlan(null)
+    load()
+  }
 
   // Raggruppa assignments per cella (line_id + week)
   const getCellAssignments = (lineId, week, year) =>
@@ -639,9 +807,10 @@ function TabPlanning() {
         <button className={`filter-chip ${view === '4weeks' ? 'active' : ''}`} onClick={() => setView('4weeks')}>
           4 settimane
         </button>
-        <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>
-          Clicca su una cella per assegnare ordini
-        </span>
+        <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }}
+          onClick={generateAutoPlan} disabled={generating}>
+          {generating ? '⟳ Generando...' : '⚡ Genera piano automatico'}
+        </button>
       </div>
 
       {loading ? (
@@ -758,6 +927,96 @@ function TabPlanning() {
                 <span style={{ fontSize: 11, color: tc, fontWeight: 500 }}>{label}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Draft plan modal */}
+      {draftPlan && (
+        <div className="modal-overlay" onClick={() => setDraftPlan(null)}>
+          <div className="modal" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title">Piano di pianificazione proposto</div>
+                <div className="text-sm text-muted" style={{ marginTop: 2 }}>
+                  {draftPlan.plan.length} assegnazioni generate — verifica e approva
+                </div>
+              </div>
+              <button className="btn btn-ghost btn-icon" onClick={() => setDraftPlan(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: 420, overflowY: 'auto' }}>
+              {draftPlan.warnings.length > 0 && (
+                <div style={{ marginBottom: 16, padding: '10px 14px', background: '#FEF3E2',
+                  borderRadius: 8, border: '1px solid #F5C880' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--warning)', marginBottom: 6 }}>
+                    ⚠ {draftPlan.warnings.length} avvisi
+                  </div>
+                  {draftPlan.warnings.map((w, i) => (
+                    <div key={i} className="text-sm text-muted">{w}</div>
+                  ))}
+                </div>
+              )}
+              {draftPlan.plan.length === 0 ? (
+                <div className="empty-state" style={{ padding: 32 }}>
+                  <div className="empty-icon">⚡</div>
+                  <div className="empty-title">Nessun ordine da pianificare</div>
+                  <div className="empty-sub">Tutti gli ordini sono già pianificati o non ci sono ordini in stato "Pianificato"</div>
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--gray-100)' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
+                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Ordine</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
+                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Prodotto</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
+                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Linea</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
+                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Settimana</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11,
+                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Pz</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
+                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Scadenza</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draftPlan.plan.map((item, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--gray-50)' }}>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span className="mono">{item._order_code}</span>
+                        </td>
+                        <td style={{ padding: '8px 12px', fontWeight: 500 }}>{item._product}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span style={{ background: 'var(--ice)', color: 'var(--blue)',
+                            padding: '2px 8px', borderRadius: 99, fontSize: 12, fontWeight: 500 }}>
+                            {item._line_name}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>W{item.week_number} {item.year}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600,
+                          color: 'var(--blue)' }}>{item.quantity_assigned}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 12,
+                          color: item._due_date && new Date(item._due_date) < new Date()
+                            ? 'var(--danger)' : 'var(--gray-500)' }}>
+                          {item._due_date ? new Date(item._due_date).toLocaleDateString('it-IT') : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDraftPlan(null)}>
+                Annulla
+              </button>
+              {draftPlan.plan.length > 0 && (
+                <button className="btn btn-primary" onClick={approvePlan}>
+                  ✓ Approva e salva piano
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

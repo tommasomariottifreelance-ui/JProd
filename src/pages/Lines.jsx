@@ -1,6 +1,105 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../components/AuthContext'
+
+// ─── Compatibility Modal ────────────────────────────────────
+function CompatibilityModal({ line, clientId, onClose }) {
+  const [products, setProducts]   = useState([])
+  const [compatible, setCompatible] = useState(new Set())
+  const [saving, setSaving]       = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      const [{ data: prods }, { data: compat }] = await Promise.all([
+        supabase.from('products').select('id, sku, name').order('name'),
+        supabase.from('line_product_compatibility')
+          .select('product_id').eq('line_id', line.id)
+      ])
+      setProducts(prods || [])
+      setCompatible(new Set((compat || []).map(c => c.product_id)))
+    }
+    load()
+  }, [line.id])
+
+  const toggle = (pid) => setCompatible(s => {
+    const n = new Set(s)
+    n.has(pid) ? n.delete(pid) : n.add(pid)
+    return n
+  })
+
+  const save = async () => {
+    setSaving(true)
+    // Delete all existing for this line
+    await supabase.from('line_product_compatibility').delete().eq('line_id', line.id)
+    // Insert new ones
+    if (compatible.size > 0) {
+      await supabase.from('line_product_compatibility').insert(
+        [...compatible].map(pid => ({
+          line_id: line.id,
+          product_id: pid,
+          client_id: clientId,
+        }))
+      )
+    }
+    setSaving(false)
+    onClose()
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 480 }}>
+        <div className="modal-header">
+          <div>
+            <div className="modal-title">Prodotti compatibili</div>
+            <div className="text-sm text-muted" style={{ marginTop: 2 }}>{line.name}</div>
+          </div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <p className="text-sm text-muted" style={{ marginBottom: 16 }}>
+            Seleziona i prodotti che questa linea può lavorare.
+            L'algoritmo di pianificazione userà queste compatibilità.
+          </p>
+          {products.length === 0 ? (
+            <div className="empty-state" style={{ padding: 24 }}>
+              <div className="empty-title">Nessun prodotto in anagrafica</div>
+              <div className="empty-sub">Aggiungi prodotti nelle Anagrafiche prima di configurare le compatibilità</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {products.map(p => (
+                <label key={p.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 14px', borderRadius: 8, cursor: 'pointer',
+                  background: compatible.has(p.id) ? 'var(--ice-light)' : 'var(--gray-50)',
+                  border: `1.5px solid ${compatible.has(p.id) ? 'var(--blue)' : 'var(--gray-100)'}`,
+                  transition: 'all var(--transition)'
+                }}>
+                  <input type="checkbox" checked={compatible.has(p.id)}
+                    onChange={() => toggle(p.id)}
+                    style={{ width: 16, height: 16, cursor: 'pointer' }} />
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 13 }}>{p.name}</div>
+                    {p.sku && <div className="text-xs text-muted">{p.sku}</div>}
+                  </div>
+                  {compatible.has(p.id) && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--blue)', fontWeight: 600 }}>✓ Compatibile</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Annulla</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'Salvataggio...' : 'Salva compatibilità'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function Lines() {
   const { profile } = useAuth()
@@ -9,6 +108,7 @@ export default function Lines() {
   const [deleting, setDeleting]   = useState(null)
   const [selected, setSelected]     = useState(new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
+  const [compatibility, setCompatibility] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm]   = useState({})
   const [saving, setSaving]       = useState(false)
@@ -240,6 +340,13 @@ export default function Lines() {
           </div>
         </div>
       )}
+      {compatibility && (
+        <CompatibilityModal
+          line={compatibility}
+          clientId={profile?.client_id}
+          onClose={() => setCompatibility(null)} />
+      )}
+
       {deletingSelected && (
         <div className="modal-overlay" onClick={() => setDeletingSelected(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
