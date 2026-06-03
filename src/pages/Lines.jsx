@@ -313,7 +313,11 @@ export default function Lines() {
                             </span>
                           </td>
                           <td onClick={e => e.stopPropagation()}>
-                            <button className="btn btn-danger btn-sm" onClick={() => setDeleting(l)}>Elimina</button>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button className="btn btn-secondary btn-sm"
+                                onClick={() => setCompatibility(l)}>Prodotti</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => setDeleting(l)}>Elimina</button>
+                            </div>
                           </td>
                         </>
                       )}
