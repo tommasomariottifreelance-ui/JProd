@@ -595,18 +595,25 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
   const { supabase } = await import('../lib/supabase')
   const { data: compat } = await supabase
     .from('line_product_compatibility').select('line_id, product_id')
-  const compatMap = {} // { product_id: Set<line_id> }
+  const compatMap = {}
   ;(compat || []).forEach(c => {
     if (!compatMap[c.product_id]) compatMap[c.product_id] = new Set()
     compatMap[c.product_id].add(c.line_id)
   })
 
-  // 2. Calcola capacità residua per linea/settimana
-  // capacità = available_hours_per_day * 60 * efficiency * 5 giorni
-  const lineCapacity = {} // { lineId_weekKey: minuti_residui }
+  // 2. FIX: usa 52 settimane per coprire tutti gli ordini, non solo quelle visibili
+  const allWeeks = getWeeksRange(0, 52)
+
+  // 3. FIX saturazione: applica cap sulla capacità TOTALE, non sulla residua
+  // capDisponibile = capTotale * SATURATION_CAP - minutiGiàUsati
+  const SATURATION_CAP = saturationPct / 100
+  const lineCapTotal = {}
+  const lineCapUsed  = {}
+
   lines.forEach(l => {
-    const cap = Math.round((l.available_hours_per_day || 0) * 60 * (l.efficiency || 1) * 5)
-    weeks.forEach(w => {
+    const capTot = Math.round((l.available_hours_per_day || 0) * 60 * (l.efficiency || 1) * 5)
+    lineCapTotal[l.id] = capTot
+    allWeeks.forEach(w => {
       const key = `${l.id}_${w.year}_${w.week}`
       const used = existingAssignments
         .filter(a => a.line_id === l.id && a.week_number === w.week && a.year === w.year)
@@ -615,24 +622,34 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
           const tpp = parseFloat(order?.time_per_piece || 0)
           return s + (a.quantity_assigned || 0) * tpp
         }, 0)
-      lineCapacity[key] = cap - used
+      lineCapUsed[key] = used
     })
   })
 
-  // 3. Ordina ordini per scadenza (prima chi scade prima)
+  const getAvailable = (lineId, week, year) => {
+    const key = `${lineId}_${year}_${week}`
+    const capMax = (lineCapTotal[lineId] || 0) * SATURATION_CAP
+    const used   = lineCapUsed[key] || 0
+    return Math.max(0, capMax - used)
+  }
+
+  const consumeCapacity = (lineId, week, year, minutes) => {
+    const key = `${lineId}_${year}_${week}`
+    lineCapUsed[key] = (lineCapUsed[key] || 0) + minutes
+  }
+
+  // 4. Ordina ordini per scadenza
   const toplan = orders
-    .filter(o => o.status === 'planned' || (o.status === 'in_production' && o.quantity_remaining > 0))
-    .filter(o => o.quantity_remaining > 0)
+    .filter(o => o.status === 'planned' || (o.status === 'in_production' && (o.quantity_remaining || 0) > 0))
+    .filter(o => (o.quantity_remaining || 0) > 0)
     .sort((a, b) => {
       if (!a.due_date) return 1
       if (!b.due_date) return -1
       return new Date(a.due_date) - new Date(b.due_date)
     })
 
-  // 4. Algoritmo greedy: satura una linea alla volta
-  // Cap all'85% della capacità (standard industriale — lascia margine per imprevisti)
-  const SATURATION_CAP = saturationPct / 100
-  const plan = [] // { order_id, line_id, week_number, year, quantity_assigned }
+  // 5. Algoritmo greedy
+  const plan = []
   const warnings = []
 
   toplan.forEach(order => {
@@ -643,55 +660,47 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
     }
 
     let remaining = order.quantity_remaining || order.quantity
-    const compatLines = lines.filter(l =>
-      compatMap[order.product_id]?.has(l.id)
-    )
+    const compatLines = lines.filter(l => compatMap[order.product_id]?.has(l.id))
 
     if (compatLines.length === 0) {
-      warnings.push(`${order.order_code}: nessuna linea compatibile con ${order.product}`)
+      warnings.push(`${order.order_code}: nessuna linea compatibile con "${order.product}"`)
       return
     }
 
-    // Per ogni settimana, satura la prima linea compatibile disponibile
-    for (const week of weeks) {
+    for (const week of allWeeks) {
       if (remaining <= 0) break
 
-      // Ordina linee per capacità residua decrescente (satura prima quella più libera)
-      const sortedLines = [...compatLines].sort((a, b) => {
-        const capA = lineCapacity[`${a.id}_${week.year}_${week.week}`] || 0
-        const capB = lineCapacity[`${b.id}_${week.year}_${week.week}`] || 0
-        return capB - capA
-      })
+      const sortedLines = [...compatLines].sort((a, b) =>
+        getAvailable(b.id, week.week, week.year) - getAvailable(a.id, week.week, week.year)
+      )
 
       for (const line of sortedLines) {
         if (remaining <= 0) break
-        const key = `${line.id}_${week.year}_${week.week}`
-        const capLeft = lineCapacity[key] || 0
-        if (capLeft <= 0) continue
+        const available = getAvailable(line.id, week.week, week.year)
+        if (available <= 0) continue
 
-        // Quanti pz possiamo fare con la capacità residua (applicando cap saturazione)?
-        const maxPz = Math.floor((capLeft * SATURATION_CAP) / tpp)
+        const maxPz = Math.floor(available / tpp)
         if (maxPz <= 0) continue
 
-        const pzThisWeek = Math.min(maxPz, remaining)
+        const pzThisWeek  = Math.min(maxPz, remaining)
         const minutesUsed = pzThisWeek * tpp
 
         plan.push({
-          order_id: order.id,
-          line_id: line.id,
-          week_number: week.week,
-          year: week.year,
+          order_id:          order.id,
+          line_id:           line.id,
+          week_number:       week.week,
+          year:              week.year,
           quantity_assigned: pzThisWeek,
-          // Metadata per la preview
-          _order_code: order.order_code,
-          _product: order.product,
-          _line_name: line.name,
-          _due_date: order.due_date,
+          _order_code:       order.order_code,
+          _product:          order.product,
+          _line_name:        line.name,
+          _due_date:         order.due_date,
         })
 
-        lineCapacity[key] -= minutesUsed
+        consumeCapacity(line.id, week.week, week.year, minutesUsed)
         remaining -= pzThisWeek
-        break // Satura una linea alla volta per settimana
+        break // satura una linea alla volta per settimana
+
       }
     }
 
@@ -706,14 +715,14 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
 // ─── TAB: PIANIFICAZIONE ─────────────────────────────────────
 function TabPlanning() {
   const { profile } = useAuth()
-  const [lines, setLines]           = useState([])
-  const [orders, setOrders]         = useState([])
+  const [lines, setLines]             = useState([])
+  const [orders, setOrders]           = useState([])
   const [assignments, setAssignments] = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [view, setView]             = useState('week') // 'week' | '4weeks'
-  const [activeCell, setActiveCell] = useState(null)
-  const [generating, setGenerating] = useState(false)
-  const [draftPlan, setDraftPlan]   = useState(null) // { plan, warnings }
+  const [loading, setLoading]         = useState(true)
+  const [view, setView]               = useState('week')
+  const [activeCell, setActiveCell]   = useState(null)
+  const [generating, setGenerating]   = useState(false)
+  const [draftPlan, setDraftPlan]     = useState(null)
   const [saturationCap, setSaturationCap] = useState(85)
 
   const weeks = view === 'week' ? getWeeksRange(0, 1) : getWeeksRange(0, 4)
@@ -740,10 +749,18 @@ function TabPlanning() {
   const generateAutoPlan = async () => {
     setGenerating(true)
     try {
-      const result = await generatePlan(orders, lines, assignments, weeks, profile?.client_id, saturationCap)
+      // Ricarica le linee con dati completi prima di pianificare
+      const { data: fullLines } = await supabase
+        .from('production_lines').select('*').eq('active', true)
+      const { data: allAssignments } = await supabase
+        .from('order_line_assignments').select('*')
+      const result = await generatePlan(
+        orders, fullLines || lines, allAssignments || [], weeks,
+        profile?.client_id, saturationCap
+      )
       setDraftPlan(result)
     } catch(e) {
-      console.error(e)
+      console.error('generatePlan error:', e)
     }
     setGenerating(false)
   }
@@ -752,27 +769,23 @@ function TabPlanning() {
     if (!draftPlan) return
     for (const item of draftPlan.plan) {
       await supabase.from('order_line_assignments').insert({
-        order_id: item.order_id,
-        line_id: item.line_id,
-        week_number: item.week_number,
-        year: item.year,
+        order_id:          item.order_id,
+        line_id:           item.line_id,
+        week_number:       item.week_number,
+        year:              item.year,
         quantity_assigned: item.quantity_assigned,
-        client_id: profile?.client_id,
+        client_id:         profile?.client_id,
       })
     }
     setDraftPlan(null)
     load()
   }
 
-  // Raggruppa assignments per cella (line_id + week)
   const getCellAssignments = (lineId, week, year) =>
     assignments.filter(a => a.line_id === lineId && a.week_number === week && a.year === year)
 
-  // Calcola minuti necessari per una cella (pz × time_per_piece da orders)
   const getCellMinutes = (lineId, week, year) => {
-    const cellAssignments = getCellAssignments(lineId, week, year)
-    return cellAssignments.reduce((s, a) => {
-      // Cerca time_per_piece dall'ordine corrispondente
+    return getCellAssignments(lineId, week, year).reduce((s, a) => {
       const order = orders.find(o => o.id === a.order_id)
       const tpp = parseFloat(order?.time_per_piece || 0)
       return s + (a.quantity_assigned || 0) * tpp
@@ -808,7 +821,6 @@ function TabPlanning() {
 
   return (
     <div>
-      {/* View switcher */}
       <div style={{ display: 'flex', gap: 8, padding: '16px 0', alignItems: 'center' }}>
         <span className="text-sm text-muted">Vista:</span>
         <button className={`filter-chip ${view === 'week' ? 'active' : ''}`} onClick={() => setView('week')}>
@@ -828,8 +840,7 @@ function TabPlanning() {
             <option value={90}>90%</option>
             <option value={95}>95%</option>
           </select>
-          <button className="btn btn-primary btn-sm"
-            onClick={generateAutoPlan} disabled={generating}>
+          <button className="btn btn-primary btn-sm" onClick={generateAutoPlan} disabled={generating}>
             {generating ? '⟳ Generando...' : '⚡ Genera piano automatico'}
           </button>
         </div>
@@ -849,23 +860,18 @@ function TabPlanning() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  <th style={{
-                    padding: '12px 16px', textAlign: 'left', fontSize: 11,
-                    fontWeight: 600, color: 'var(--gray-500)', textTransform: 'uppercase',
-                    letterSpacing: '0.7px', borderBottom: '2px solid var(--gray-100)',
-                    background: 'white', minWidth: 160
-                  }}>
+                  <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600,
+                    color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '0.7px',
+                    borderBottom: '2px solid var(--gray-100)', background: 'white', minWidth: 160 }}>
                     Linea
                   </th>
                   {weeks.map(w => (
                     <th key={`${w.year}-${w.week}`} style={{
-                      padding: '12px 16px', textAlign: 'center', fontSize: 11,
-                      fontWeight: 600, color: w.isCurrentWeek ? 'var(--blue)' : 'var(--gray-500)',
+                      padding: '12px 16px', textAlign: 'center', fontSize: 11, fontWeight: 600,
+                      color: w.isCurrentWeek ? 'var(--blue)' : 'var(--gray-500)',
                       textTransform: 'uppercase', letterSpacing: '0.7px',
                       borderBottom: `2px solid ${w.isCurrentWeek ? 'var(--blue)' : 'var(--gray-100)'}`,
-                      background: w.isCurrentWeek ? 'var(--ice-light)' : 'white',
-                      minWidth: 160
-                    }}>
+                      background: w.isCurrentWeek ? 'var(--ice-light)' : 'white', minWidth: 160 }}>
                       <div>{w.label}</div>
                       <div style={{ fontWeight: 400, fontSize: 10, marginTop: 2, textTransform: 'none' }}>{w.range}</div>
                     </th>
@@ -875,10 +881,8 @@ function TabPlanning() {
               <tbody>
                 {lines.map(line => (
                   <tr key={line.id}>
-                    <td style={{
-                      padding: '14px 16px', borderBottom: '1px solid var(--gray-50)',
-                      fontWeight: 500, fontSize: 13, color: 'var(--gray-900)'
-                    }}>
+                    <td style={{ padding: '14px 16px', borderBottom: '1px solid var(--gray-50)',
+                      fontWeight: 500, fontSize: 13, color: 'var(--gray-900)' }}>
                       <div>{line.name}</div>
                       {line.available_hours_per_day && (
                         <div className="text-xs text-muted" style={{ marginTop: 2 }}>
@@ -888,31 +892,27 @@ function TabPlanning() {
                     </td>
                     {weeks.map(w => {
                       const cellAssignments = getCellAssignments(line.id, w.week, w.year)
-                      const totalPz = cellAssignments.reduce((s, a) => s + (a.quantity_assigned || 0), 0)
-                      const loadPct = getLoadPct(line.id, w.week, w.year, line)
-                      const capWeek = getCapacityWeek(line)
-                      const usedMin = getCellMinutes(line.id, w.week, w.year)
+                      const totalPz  = cellAssignments.reduce((s, a) => s + (a.quantity_assigned || 0), 0)
+                      const loadPct  = getLoadPct(line.id, w.week, w.year, line)
+                      const capWeek  = getCapacityWeek(line)
+                      const usedMin  = getCellMinutes(line.id, w.week, w.year)
                       const bg = getLoadColor(loadPct, !!capWeek)
                       const tc = getLoadTextColor(loadPct, !!capWeek)
                       return (
                         <td key={`${w.year}-${w.week}`}
                           onClick={() => setActiveCell({ line, week: w })}
-                          style={{
-                            padding: '10px 12px', borderBottom: '1px solid var(--gray-50)',
+                          style={{ padding: '10px 12px', borderBottom: '1px solid var(--gray-50)',
                             background: bg, cursor: 'pointer', verticalAlign: 'top',
                             transition: 'filter 0.15s', minHeight: 80,
-                            borderLeft: w.isCurrentWeek ? '2px solid var(--ice)' : '1px solid var(--gray-50)'
-                          }}
+                            borderLeft: w.isCurrentWeek ? '2px solid var(--ice)' : '1px solid var(--gray-50)' }}
                           onMouseEnter={e => e.currentTarget.style.filter = 'brightness(0.96)'}
                           onMouseLeave={e => e.currentTarget.style.filter = ''}>
                           {cellAssignments.length > 0 ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                               {cellAssignments.slice(0, 3).map(a => (
-                                <div key={a.id} style={{
-                                  background: 'white', borderRadius: 6, padding: '4px 8px',
-                                  fontSize: 11, borderLeft: '3px solid var(--blue)',
-                                  boxShadow: 'var(--shadow-sm)'
-                                }}>
+                                <div key={a.id} style={{ background: 'white', borderRadius: 6,
+                                  padding: '4px 8px', fontSize: 11,
+                                  borderLeft: '3px solid var(--blue)', boxShadow: 'var(--shadow-sm)' }}>
                                   <div style={{ fontWeight: 600, color: 'var(--gray-900)' }}>{a.orders?.order_code}</div>
                                   <div style={{ color: 'var(--gray-500)', marginTop: 1 }}>{a.quantity_assigned} pz</div>
                                 </div>
@@ -939,11 +939,9 @@ function TabPlanning() {
               </tbody>
             </table>
           </div>
-
-          {/* Legenda */}
           <div style={{ padding: '12px 20px', borderTop: '1px solid var(--gray-50)', display: 'flex', gap: 16, alignItems: 'center' }}>
             <span className="text-xs text-muted">Carico:</span>
-            {[['#E8F8F2', 'var(--success)', '≤70%'], ['#FEF3E2', 'var(--warning)', '71-90%'], ['#FEF0EE', 'var(--danger)', '>90%']].map(([bg, tc, label]) => (
+            {[['#E8F8F2','var(--success)','≤70%'],['#FEF3E2','var(--warning)','71-90%'],['#FEF0EE','var(--danger)','>90%']].map(([bg,tc,label]) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                 <div style={{ width: 12, height: 12, background: bg, borderRadius: 3, border: '1px solid var(--gray-100)' }} />
                 <span style={{ fontSize: 11, color: tc, fontWeight: 500 }}>{label}</span>
@@ -953,15 +951,14 @@ function TabPlanning() {
         </div>
       )}
 
-      {/* Draft plan modal */}
       {draftPlan && (
         <div className="modal-overlay" onClick={() => setDraftPlan(null)}>
           <div className="modal" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <div className="modal-title">Piano di pianificazione proposto</div>
+                <div className="modal-title">Piano proposto</div>
                 <div className="text-sm text-muted" style={{ marginTop: 2 }}>
-                  {draftPlan.plan.length} assegnazioni generate — verifica e approva
+                  {draftPlan.plan.length} assegnazioni · saturazione max {saturationCap}%
                 </div>
               </div>
               <button className="btn btn-ghost btn-icon" onClick={() => setDraftPlan(null)}>✕</button>
@@ -982,32 +979,22 @@ function TabPlanning() {
                 <div className="empty-state" style={{ padding: 32 }}>
                   <div className="empty-icon">⚡</div>
                   <div className="empty-title">Nessun ordine da pianificare</div>
-                  <div className="empty-sub">Tutti gli ordini sono già pianificati o non ci sono ordini in stato "Pianificato"</div>
+                  <div className="empty-sub">Verifica le compatibilità linea-prodotto nelle Anagrafiche</div>
                 </div>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
                     <tr style={{ borderBottom: '2px solid var(--gray-100)' }}>
-                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
-                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Ordine</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
-                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Prodotto</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
-                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Linea</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
-                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Settimana</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11,
-                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Pz</th>
-                      <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11,
-                        color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>Scadenza</th>
+                      {['Ordine','Prodotto','Linea','Settimana','Pz','Scadenza'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: h === 'Pz' ? 'right' : 'left',
+                          fontSize: 11, color: 'var(--gray-500)', fontWeight: 600, textTransform: 'uppercase' }}>{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {draftPlan.plan.map((item, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--gray-50)' }}>
-                        <td style={{ padding: '8px 12px' }}>
-                          <span className="mono">{item._order_code}</span>
-                        </td>
+                        <td style={{ padding: '8px 12px' }}><span className="mono">{item._order_code}</span></td>
                         <td style={{ padding: '8px 12px', fontWeight: 500 }}>{item._product}</td>
                         <td style={{ padding: '8px 12px' }}>
                           <span style={{ background: 'var(--ice)', color: 'var(--blue)',
@@ -1016,11 +1003,11 @@ function TabPlanning() {
                           </span>
                         </td>
                         <td style={{ padding: '8px 12px' }}>W{item.week_number} {item.year}</td>
-                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600,
-                          color: 'var(--blue)' }}>{item.quantity_assigned}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: 'var(--blue)' }}>
+                          {item.quantity_assigned}
+                        </td>
                         <td style={{ padding: '8px 12px', fontSize: 12,
-                          color: item._due_date && new Date(item._due_date) < new Date()
-                            ? 'var(--danger)' : 'var(--gray-500)' }}>
+                          color: item._due_date && new Date(item._due_date) < new Date() ? 'var(--danger)' : 'var(--gray-500)' }}>
                           {item._due_date ? new Date(item._due_date).toLocaleDateString('it-IT') : '—'}
                         </td>
                       </tr>
@@ -1030,30 +1017,22 @@ function TabPlanning() {
               )}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setDraftPlan(null)}>
-                Annulla
-              </button>
+              <button className="btn btn-secondary" onClick={() => setDraftPlan(null)}>Annulla</button>
               {draftPlan.plan.length > 0 && (
-                <button className="btn btn-primary" onClick={approvePlan}>
-                  ✓ Approva e salva piano
-                </button>
+                <button className="btn btn-primary" onClick={approvePlan}>✓ Approva e salva piano</button>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Overlay chiudi pannello */}
       {activeCell && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(11,31,58,0.2)' }}
           onClick={() => setActiveCell(null)} />
       )}
-
       {activeCell && (
         <AssignPanel
-          cell={activeCell}
-          orders={orders}
-          lines={lines}
+          cell={activeCell} orders={orders} lines={lines}
           clientId={profile?.client_id}
           onClose={() => setActiveCell(null)}
           onSaved={() => { setActiveCell(null); load() }} />
@@ -1075,17 +1054,16 @@ export default function Production() {
         </div>
       </div>
 
-      <div style={{ borderBottom: '1px solid var(--gray-100)', background: 'white', padding: '0 32px', display: 'flex', gap: 0 }}>
-        {[['orders', 'Ordini'], ['planning', 'Pianificazione']].map(([key, label]) => (
+      <div style={{ borderBottom: '1px solid var(--gray-100)', background: 'white',
+        padding: '0 32px', display: 'flex', gap: 0 }}>
+        {[['orders','Ordini'],['planning','Pianificazione']].map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} style={{
             padding: '14px 20px', border: 'none', background: 'none', cursor: 'pointer',
             fontFamily: 'var(--font)', fontSize: 14, fontWeight: tab === key ? 600 : 400,
             color: tab === key ? 'var(--blue)' : 'var(--gray-500)',
             borderBottom: `2px solid ${tab === key ? 'var(--blue)' : 'transparent'}`,
             transition: 'all var(--transition)', marginBottom: -1
-          }}>
-            {label}
-          </button>
+          }}>{label}</button>
         ))}
       </div>
 
