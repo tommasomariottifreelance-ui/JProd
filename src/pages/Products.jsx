@@ -164,7 +164,7 @@ export default function Products() {
                         </>
                       ) : (
                         <>
-                          <td><span className="mono" style={{ fontWeight: 600 }}>{p.sku || '—'}</span></td>
+                          <td><span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "var(--navy)", letterSpacing: "0.5px" }}>{p.sku || '—'}</span></td>
                           <td className="font-medium">
                             {p.name}
                             {p._fromOrders && <span className="text-xs text-muted" style={{ marginLeft: 8 }}>da ordini</span>}
