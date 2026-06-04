@@ -592,7 +592,7 @@ function TabOrders() {
 // ─── ALGORITMO PIANIFICAZIONE ────────────────────────────────
 async function generatePlan(orders, lines, existingAssignments, weeks, clientId, saturationPct = 85) {
   // 1. Carica compatibilità linea-prodotto
-  const { supabase } = await import('../lib/supabase')
+  // Usa supabase importato staticamente in cima al file
   const { data: compat } = await supabase
     .from('line_product_compatibility').select('line_id, product_id')
   const compatMap = {}
