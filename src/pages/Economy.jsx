@@ -240,6 +240,22 @@ function Forecast({ orders, lines }) {
     ...m, ricavo: Math.round(m.ricavo), costo: Math.round(m.costo), margine: Math.round(m.margine)
   }))
 
+  // Calcola righe SKU fuori dal JSX (evita IIFE che causa crash con esbuild)
+  const skuMap = {}
+  data.forEach(o => {
+    const key = o.sku || o.product || 'N/D'
+    if (!skuMap[key]) skuMap[key] = {
+      sku: o.sku, product: o.product, brand: o.brand_name,
+      orders: 0, pzRim: 0, ricavo: 0, costo: 0, margine: 0
+    }
+    skuMap[key].orders++
+    skuMap[key].pzRim   += o.pzRim
+    skuMap[key].ricavo  += o.forecastRicavo
+    skuMap[key].costo   += o.forecastCosto
+    skuMap[key].margine += o.forecastMargine
+  })
+  const skuRows = Object.values(skuMap).sort((a, b) => b.ricavo - a.ricavo)
+
   return (
     <div>
       <div style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--ice-light)', borderRadius: 10, border: '1px solid var(--ice)' }}>
@@ -317,50 +333,32 @@ function Forecast({ orders, lines }) {
               </tr>
             </thead>
             <tbody>
-              {(() => {
-                // Raggruppa per SKU
-                const skuMap = {}
-                data.forEach(o => {
-                  const key = o.sku || o.product || 'N/D'
-                  if (!skuMap[key]) skuMap[key] = {
-                    sku: o.sku, product: o.product, brand: o.brand_name,
-                    orders: 0, pzRim: 0, ricavo: 0, costo: 0, margine: 0
-                  }
-                  skuMap[key].orders++
-                  skuMap[key].pzRim    += o.pzRim
-                  skuMap[key].ricavo   += o.forecastRicavo
-                  skuMap[key].costo    += o.forecastCosto
-                  skuMap[key].margine  += o.forecastMargine
-                })
-                return Object.values(skuMap)
-                  .sort((a,b) => b.ricavo - a.ricavo)
-                  .map((s, i) => {
-                    const mPct = s.ricavo > 0 ? (s.margine / s.ricavo) * 100 : null
-                    return (
-                      <tr key={i}>
-                        <td><span style={{ fontFamily:'var(--mono)', fontWeight:700, fontSize:13, color:'var(--navy)' }}>{s.sku || '—'}</span></td>
-                        <td className="font-medium">{s.product}</td>
-                        <td>{s.brand ?? '—'}</td>
-                        <td style={{ textAlign:'center' }}>{s.orders}</td>
-                        <td style={{ fontWeight:600 }}>{s.pzRim.toLocaleString()}</td>
-                        <td style={{ color:'var(--blue)', fontWeight:500 }}>
-                          {s.ricavo > 0 ? `€ ${fmt(s.ricavo)}` : '—'}
-                        </td>
-                        <td style={{ color:'var(--warning)' }}>
-                          {s.costo > 0 ? `€ ${fmt(s.costo)}` : '—'}
-                        </td>
-                        <td style={{ fontWeight:600, color: s.margine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                          {s.ricavo > 0 ? `€ ${fmt(s.margine)}` : '—'}
-                          {mPct !== null && s.ricavo > 0 && (
-                            <span style={{ fontSize:11, fontWeight:400, color:'var(--gray-500)', marginLeft:4 }}>
-                              ({fmt(mPct)}%)
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })
-              })()}
+              {skuRows.map((s, i) => {
+                const mPct = s.ricavo > 0 ? (s.margine / s.ricavo) * 100 : null
+                return (
+                  <tr key={i}>
+                    <td><span style={{ fontFamily:'var(--mono)', fontWeight:700, fontSize:13, color:'var(--navy)' }}>{s.sku || '—'}</span></td>
+                    <td className="font-medium">{s.product}</td>
+                    <td>{s.brand ?? '—'}</td>
+                    <td style={{ textAlign:'center' }}>{s.orders}</td>
+                    <td style={{ fontWeight:600 }}>{s.pzRim.toLocaleString()}</td>
+                    <td style={{ color:'var(--blue)', fontWeight:500 }}>
+                      {s.ricavo > 0 ? `€ ${fmt(s.ricavo)}` : '—'}
+                    </td>
+                    <td style={{ color:'var(--warning)' }}>
+                      {s.costo > 0 ? `€ ${fmt(s.costo)}` : '—'}
+                    </td>
+                    <td style={{ fontWeight:600, color: s.margine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      {s.ricavo > 0 ? `€ ${fmt(s.margine)}` : '—'}
+                      {mPct !== null && s.ricavo > 0 && (
+                        <span style={{ fontSize:11, fontWeight:400, color:'var(--gray-500)', marginLeft:4 }}>
+                          ({fmt(mPct)}%)
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
