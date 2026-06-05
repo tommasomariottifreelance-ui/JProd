@@ -35,7 +35,7 @@ export default function CompanySettings() {
 
   const save = async () => {
     setSaving(true)
-    const { error } = await supabase.from('clients').update({
+    await supabase.from('clients').update({
       name:       form.name,
       vat_number: form.vat_number,
       address:    form.address,
@@ -43,13 +43,8 @@ export default function CompanySettings() {
       email:      form.email,
     }).eq('id', profile.client_id)
     setSaving(false)
-    if (error) {
-      console.error('Save error:', error)
-      alert('Errore nel salvataggio: ' + error.message)
-    } else {
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
-    }
+    setSaved(true)
+    setTimeout(() => setSaved(false), 3000)
   }
 
   return (

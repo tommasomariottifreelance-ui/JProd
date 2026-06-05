@@ -67,12 +67,11 @@ function Consuntivo({ orders, lines }) {
   const brandMap = {}
   data.forEach(o => {
     const b = o.brand_name ?? 'N/D'
-    if (!brandMap[b]) brandMap[b] = { brand: b, costo: 0, ricavo: 0, margine: 0, pz_prodotti: 0 }
+    if (!brandMap[b]) brandMap[b] = { brand: b, costo: 0, ricavo: 0, margine: 0 }
     brandMap[b].costo   += o.costo
     brandMap[b].ricavo  += o.ricavo
     brandMap[b].margine += o.margine
   })
-    brandMap[b].pz_prodotti += (o.quantity_produced || 0)
   const brandData = Object.values(brandMap).map(b => ({
     ...b,
     costo: Math.round(b.costo),
@@ -113,20 +112,39 @@ function Consuntivo({ orders, lines }) {
         </div>
 
         <div className="card">
-          <div className="card-header">
-            <div className="card-title">Consuntivo ordini per brand</div>
-            <div className="card-sub">Pz prodotti per brand — anno {new Date().getFullYear()}</div>
-          </div>
-          <div className="card-body">
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={brandData} barSize={22}>
-                <XAxis dataKey="brand" tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }}
-                  formatter={v => [`${v.toLocaleString('it-IT')} pz`]} />
-                <Bar dataKey="pz_prodotti" fill="var(--blue)" radius={[4,4,0,0]} name="Pz prodotti" />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="card-header"><div className="card-title">Top ordini per margine</div></div>
+          <div className="card-body" style={{ padding: 0 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--gray-100)' }}>
+                  <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--gray-500)', fontWeight: 600 }}>Ordine</th>
+                  <th style={{ padding: '8px 16px', textAlign: 'right', fontSize: 11, color: 'var(--gray-500)', fontWeight: 600 }}>Margine</th>
+                  <th style={{ padding: '8px 16px', textAlign: 'right', fontSize: 11, color: 'var(--gray-500)', fontWeight: 600 }}>%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sort((a,b) => b.margine - a.margine).slice(0,6).map(o => (
+                  <tr key={o.id} style={{ borderBottom: '1px solid var(--gray-50)' }}>
+                    <td style={{ padding: '8px 16px' }}>
+                      <div style={{ fontWeight: 500 }}>{o.order_code}</div>
+                      <div className="text-xs text-muted">{o.product}</div>
+                    </td>
+                    <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 600, color: o.margine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      € {fmt(o.margine)}
+                    </td>
+                    <td style={{ padding: '8px 16px', textAlign: 'right' }}>
+                      {o.marginePct !== null ? (
+                        <span style={{
+                          fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 99,
+                          background: o.marginePct >= 30 ? '#E8F8F2' : o.marginePct >= 10 ? 'var(--ice)' : '#FEF3E2',
+                          color: o.marginePct >= 30 ? 'var(--success)' : o.marginePct >= 10 ? 'var(--blue)' : 'var(--warning)'
+                        }}>{fmt(o.marginePct)}%</span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -240,22 +258,6 @@ function Forecast({ orders, lines }) {
     ...m, ricavo: Math.round(m.ricavo), costo: Math.round(m.costo), margine: Math.round(m.margine)
   }))
 
-  // Calcola righe SKU fuori dal JSX (evita IIFE che causa crash con esbuild)
-  const skuMap = {}
-  data.forEach(o => {
-    const key = o.sku || o.product || 'N/D'
-    if (!skuMap[key]) skuMap[key] = {
-      sku: o.sku, product: o.product, brand: o.brand_name,
-      orders: 0, pzRim: 0, ricavo: 0, costo: 0, margine: 0
-    }
-    skuMap[key].orders++
-    skuMap[key].pzRim   += o.pzRim
-    skuMap[key].ricavo  += o.forecastRicavo
-    skuMap[key].costo   += o.forecastCosto
-    skuMap[key].margine += o.forecastMargine
-  })
-  const skuRows = Object.values(skuMap).sort((a, b) => b.ricavo - a.ricavo)
-
   return (
     <div>
       <div style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--ice-light)', borderRadius: 10, border: '1px solid var(--ice)' }}>
@@ -320,45 +322,49 @@ function Forecast({ orders, lines }) {
 
       <div className="card">
         <div className="card-header" style={{ padding: '20px 24px 16px' }}>
-          <div className="card-title">Dettaglio forecast per codice articolo</div>
-          <div className="card-sub">Raggruppato per SKU — ordini aperti con scadenza entro il {currentYear}</div>
+          <div className="card-title">Dettaglio forecast per ordine</div>
+          <div className="card-sub">Ordini aperti con scadenza entro il {currentYear}</div>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Cod. Articolo</th><th>Prodotto</th><th>Brand</th>
-                <th>Nr. Ordini</th><th>Pz rimanenti</th>
-                <th>Ricavo atteso</th><th>Costo atteso</th><th>Margine</th>
+                <th>Ordine</th><th>Prodotto</th><th>Brand</th><th>Scadenza</th>
+                <th>Pz rimanenti</th><th>Ricavo atteso</th><th>Costo atteso</th><th>Margine</th>
               </tr>
             </thead>
             <tbody>
-              {skuRows.map((s, i) => {
-                const mPct = s.ricavo > 0 ? (s.margine / s.ricavo) * 100 : null
-                return (
-                  <tr key={i}>
-                    <td><span style={{ fontFamily:'var(--mono)', fontWeight:700, fontSize:13, color:'var(--navy)' }}>{s.sku || '—'}</span></td>
-                    <td className="font-medium">{s.product}</td>
-                    <td>{s.brand ?? '—'}</td>
-                    <td style={{ textAlign:'center' }}>{s.orders}</td>
-                    <td style={{ fontWeight:600 }}>{s.pzRim.toLocaleString()}</td>
-                    <td style={{ color:'var(--blue)', fontWeight:500 }}>
-                      {s.ricavo > 0 ? `€ ${fmt(s.ricavo)}` : '—'}
-                    </td>
-                    <td style={{ color:'var(--warning)' }}>
-                      {s.costo > 0 ? `€ ${fmt(s.costo)}` : '—'}
-                    </td>
-                    <td style={{ fontWeight:600, color: s.margine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {s.ricavo > 0 ? `€ ${fmt(s.margine)}` : '—'}
-                      {mPct !== null && s.ricavo > 0 && (
-                        <span style={{ fontSize:11, fontWeight:400, color:'var(--gray-500)', marginLeft:4 }}>
-                          ({fmt(mPct)}%)
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
+              {data.sort((a,b) => {
+                if (!a.due_date) return 1
+                if (!b.due_date) return -1
+                return new Date(a.due_date) - new Date(b.due_date)
+              }).map(o => (
+                <tr key={o.id}>
+                  <td><span className="mono">{o.order_code}</span></td>
+                  <td className="font-medium">{o.product}</td>
+                  <td>{o.brand_name ?? '—'}</td>
+                  <td style={{ fontSize: 12,
+                    color: o.due_date && new Date(o.due_date) < new Date() ? 'var(--danger)' : 'var(--gray-700)' }}>
+                    {o.due_date ? new Date(o.due_date).toLocaleDateString('it-IT') : '—'}
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{o.pzRim.toLocaleString()}</td>
+                  <td style={{ color: 'var(--blue)', fontWeight: 500 }}>
+                    {o.forecastRicavo > 0 ? `€ ${fmt(o.forecastRicavo)}` : '—'}
+                  </td>
+                  <td style={{ color: 'var(--warning)' }}>
+                    {o.forecastCosto > 0 ? `€ ${fmt(o.forecastCosto)}` : '—'}
+                  </td>
+                  <td style={{ fontWeight: 600,
+                    color: o.forecastMargine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {o.forecastRicavo > 0 ? `€ ${fmt(o.forecastMargine)}` : '—'}
+                    {o.forecastMarginePct !== null && o.forecastRicavo > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--gray-500)', marginLeft: 4 }}>
+                        ({fmt(o.forecastMarginePct)}%)
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

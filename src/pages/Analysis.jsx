@@ -65,30 +65,22 @@ export default function Analysis() {
     color: s === 'planned' ? '#1A5FA8' : s === 'in_production' ? '#1A9E6E' : s === 'completed' ? '#6B85A0' : '#D4820A'
   })).filter(s => s.value > 0)
 
-  // ── Grafico mensile con brand affiancati (grouped) ──
+  // ── Grafico settimane con brand affiancati (grouped) ──
   const brandSet = new Set()
-  const monthBrandMap = {}
-  // Inizializza tutti i 12 mesi
-  MONTHS.forEach(m => { monthBrandMap[m] = { label: m } })
+  const weekBrandMap = {}
   orders.forEach(o => {
-    if (!o.due_date && !o.week) return
-    // Usa due_date per determinare il mese, fallback su week
-    let monthIdx
-    if (o.due_date) {
-      monthIdx = new Date(o.due_date).getMonth()
-    } else {
-      const jan1 = new Date(new Date().getFullYear(), 0, 1)
-      const d = new Date(jan1.getTime() + (o.week - 1) * 7 * 86400000)
-      monthIdx = d.getMonth()
-    }
-    const month = MONTHS[monthIdx]
+    if (!o.week) return
+    const month = weekToMonth(o.week, new Date().getFullYear())
+    const key = `W${o.week}\n${month}`
+    if (!weekBrandMap[key]) weekBrandMap[key] = { week: `W${o.week}`, label: `W${o.week} ${month}` }
     const brand = o.brand_name ?? 'N/D'
     brandSet.add(brand)
-    if (!monthBrandMap[month]) monthBrandMap[month] = { label: month }
-    monthBrandMap[month][brand] = (monthBrandMap[month][brand] || 0) + (o.quantity || 0)
+    weekBrandMap[key][brand] = (weekBrandMap[key][brand] || 0) + (o.quantity || 0)
   })
   const brands = [...brandSet]
-  const weeklyData = MONTHS.map(m => monthBrandMap[m] || { label: m })
+  const weeklyData = Object.values(weekBrandMap)
+    .sort((a, b) => parseInt(a.week.replace('W','')) - parseInt(b.week.replace('W','')))
+    .slice(-8)
 
   // ── Grafico andamento pz prodotti per mese (anno corrente) ──
   const currentYear = new Date().getFullYear()
@@ -158,13 +150,13 @@ export default function Analysis() {
           {/* Grafico settimane grouped per brand */}
           <div className="card">
             <div className="card-header">
-              <div className="card-title">Quantità per mese per brand</div>
-              <div className="card-sub">Anno {new Date().getFullYear()} — quantità per mese per brand</div>
+              <div className="card-title">Quantità per settimana per brand</div>
+              <div className="card-sub">Ultime 8 settimane — barre affiancate per brand</div>
             </div>
             <div className="card-body">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={weeklyData} barSize={12} barGap={2} barCategoryGap="25%">
-                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} interval={0} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 11, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 13 }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
