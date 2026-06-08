@@ -64,6 +64,9 @@ function Consuntivo({ orders, lines }) {
   ).length
 
   // Brand data
+  // Brand aggregation con pz prodotti per mese (anno corrente)
+  const currentYear = new Date().getFullYear()
+  const MONTHS_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
   const brandMap = {}
   data.forEach(o => {
     const b = o.brand_name ?? 'N/D'
@@ -78,6 +81,27 @@ function Consuntivo({ orders, lines }) {
     ricavo: Math.round(b.ricavo),
     margine: Math.round(b.margine)
   }))
+
+  // Dati per grafico consuntivo per brand nel tempo (pz prodotti per mese per brand)
+  const brandSet = new Set(data.map(o => o.brand_name ?? 'N/D'))
+  const brandList = [...brandSet]
+  const BRAND_COLORS_ECO = ['#1A5FA8','#1A9E6E','#D4820A','#4A9FD4','#7EC8E3','#A8BDD0']
+  // Inizializza tutti i mesi a 0 per ogni brand
+  const monthBrandProd = MONTHS_SHORT.map(m => {
+    const row = { month: m }
+    brandList.forEach(b => { row[b] = 0 })
+    return row
+  })
+  // Popola con i pz prodotti da production_log — usiamo orders come proxy (quantity_produced per mese)
+  // Usiamo due_date come riferimento temporale dell'ordine
+  data.forEach(o => {
+    if (!o.due_date || (o.quantity_produced || 0) === 0) return
+    const d = new Date(o.due_date)
+    if (d.getFullYear() !== currentYear) return
+    const mIdx = d.getMonth()
+    const brand = o.brand_name ?? 'N/D'
+    monthBrandProd[mIdx][brand] = (monthBrandProd[mIdx][brand] || 0) + (o.quantity_produced || 0)
+  })
 
   return (
     <div>
@@ -112,39 +136,24 @@ function Consuntivo({ orders, lines }) {
         </div>
 
         <div className="card">
-          <div className="card-header"><div className="card-title">Top ordini per margine</div></div>
-          <div className="card-body" style={{ padding: 0 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--gray-100)' }}>
-                  <th style={{ padding: '8px 16px', textAlign: 'left', fontSize: 11, color: 'var(--gray-500)', fontWeight: 600 }}>Ordine</th>
-                  <th style={{ padding: '8px 16px', textAlign: 'right', fontSize: 11, color: 'var(--gray-500)', fontWeight: 600 }}>Margine</th>
-                  <th style={{ padding: '8px 16px', textAlign: 'right', fontSize: 11, color: 'var(--gray-500)', fontWeight: 600 }}>%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.sort((a,b) => b.margine - a.margine).slice(0,6).map(o => (
-                  <tr key={o.id} style={{ borderBottom: '1px solid var(--gray-50)' }}>
-                    <td style={{ padding: '8px 16px' }}>
-                      <div style={{ fontWeight: 500 }}>{o.order_code}</div>
-                      <div className="text-xs text-muted">{o.product}</div>
-                    </td>
-                    <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 600, color: o.margine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      € {fmt(o.margine)}
-                    </td>
-                    <td style={{ padding: '8px 16px', textAlign: 'right' }}>
-                      {o.marginePct !== null ? (
-                        <span style={{
-                          fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 99,
-                          background: o.marginePct >= 30 ? '#E8F8F2' : o.marginePct >= 10 ? 'var(--ice)' : '#FEF3E2',
-                          color: o.marginePct >= 30 ? 'var(--success)' : o.marginePct >= 10 ? 'var(--blue)' : 'var(--warning)'
-                        }}>{fmt(o.marginePct)}%</span>
-                      ) : '—'}
-                    </td>
-                  </tr>
+          <div className="card-header">
+            <div className="card-title">Consuntivo ordini per brand</div>
+            <div className="card-sub">Pz prodotti per mese — {currentYear}</div>
+          </div>
+          <div className="card-body">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={monthBrandProd} barSize={10} barGap={2} barCategoryGap="20%">
+                <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: '#6B85A0' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: 'none', fontSize: 12 }}
+                  formatter={(v, name) => [`${v.toLocaleString('it-IT')} pz`, name]} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {brandList.map((b, i) => (
+                  <Bar key={b} dataKey={b} fill={BRAND_COLORS_ECO[i % BRAND_COLORS_ECO.length]}
+                    radius={[3,3,0,0]} name={b} />
                 ))}
-              </tbody>
-            </table>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
       </div>

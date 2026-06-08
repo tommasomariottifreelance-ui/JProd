@@ -903,11 +903,14 @@ function TabPlanning() {
                         <button
                           onClick={e => { e.stopPropagation(); deleteWeekAssignments(w.week, w.year) }}
                           title="Elimina tutte le assegnazioni di questa settimana"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--danger)', fontSize: 12, padding: '1px 5px',
-                            borderRadius: 4, opacity: 0.55, lineHeight: 1 }}
+                          style={{ background: 'none', border: '1px solid var(--danger)', cursor: 'pointer',
+                            color: 'var(--danger)', fontSize: 10, padding: '2px 6px',
+                            borderRadius: 4, opacity: 0.6, lineHeight: 1, display: 'flex',
+                            alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}
                           onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}>✕</button>
+                          onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}>
+                          <span>✕</span><span>Svuota</span>
+                        </button>
                       </div>
                       <div style={{ fontWeight: 400, fontSize: 10, marginTop: 2, textTransform: 'none' }}>{w.range}</div>
                     </th>
