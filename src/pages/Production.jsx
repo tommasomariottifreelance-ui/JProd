@@ -503,7 +503,7 @@ function TabOrders() {
                   <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
                     <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} /></td>
                     <td><span className="mono">{o.order_code}</span></td>
-                    <td><span className="mono" style={{ fontSize: 11 }}>{o.commessa_code || '—'}</span></td>
+                    <td style={{ whiteSpace: 'nowrap' }}><span className="mono" style={{ fontSize: 11 }}>{o.commessa_code || '—'}</span></td>
                     <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <span className="text-sm text-muted">{o.order_description || '—'}</span>
                     </td>
@@ -638,10 +638,26 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
     lineCapUsed[key] = (lineCapUsed[key] || 0) + minutes
   }
 
-  // 4. Ordina ordini per scadenza
+  // 4. Calcola pz già pianificati per ordine (da TUTTE le assegnazioni esistenti)
+  const alreadyPlanned = {}
+  existingAssignments.forEach(a => {
+    alreadyPlanned[a.order_id] = (alreadyPlanned[a.order_id] || 0) + (a.quantity_assigned || 0)
+  })
+
+  // 5. Ordina ordini per scadenza — escludi quelli già completamente coperti
   const toplan = orders
     .filter(o => o.status === 'planned' || (o.status === 'in_production' && (o.quantity_remaining || 0) > 0))
-    .filter(o => (o.quantity_remaining || 0) > 0)
+    .filter(o => {
+      const qRem = o.quantity_remaining || 0
+      const qPlanned = alreadyPlanned[o.id] || 0
+      // Salta se già pianificato completamente
+      return qRem > 0 && qPlanned < qRem
+    })
+    .map(o => ({
+      ...o,
+      // Quantità ancora da pianificare = rimanenti - già in pianificazione
+      quantity_remaining: Math.max(0, (o.quantity_remaining || 0) - (alreadyPlanned[o.id] || 0))
+    }))
     .sort((a, b) => {
       if (!a.due_date) return 1
       if (!b.due_date) return -1
@@ -781,6 +797,16 @@ function TabPlanning() {
     load()
   }
 
+  const deleteWeekAssignments = async (week, year) => {
+    if (!window.confirm(`Eliminare tutte le assegnazioni della settimana W${week} ${year}?`)) return
+    await supabase
+      .from('order_line_assignments')
+      .delete()
+      .eq('week_number', week)
+      .eq('year', year)
+    load()
+  }
+
   const getCellAssignments = (lineId, week, year) =>
     assignments.filter(a => a.line_id === lineId && a.week_number === week && a.year === year)
 
@@ -872,7 +898,17 @@ function TabPlanning() {
                       textTransform: 'uppercase', letterSpacing: '0.7px',
                       borderBottom: `2px solid ${w.isCurrentWeek ? 'var(--blue)' : 'var(--gray-100)'}`,
                       background: w.isCurrentWeek ? 'var(--ice-light)' : 'white', minWidth: 160 }}>
-                      <div>{w.label}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                        <span>{w.label}</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteWeekAssignments(w.week, w.year) }}
+                          title="Elimina tutte le assegnazioni di questa settimana"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer',
+                            color: 'var(--danger)', fontSize: 12, padding: '1px 5px',
+                            borderRadius: 4, opacity: 0.55, lineHeight: 1 }}
+                          onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                          onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}>✕</button>
+                      </div>
                       <div style={{ fontWeight: 400, fontSize: 10, marginTop: 2, textTransform: 'none' }}>{w.range}</div>
                     </th>
                   ))}

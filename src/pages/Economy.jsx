@@ -258,6 +258,22 @@ function Forecast({ orders, lines }) {
     ...m, ricavo: Math.round(m.ricavo), costo: Math.round(m.costo), margine: Math.round(m.margine)
   }))
 
+  // Raggruppa per SKU fuori dal JSX (evita crash con esbuild)
+  const skuMap = {}
+  data.forEach(o => {
+    const key = o.sku || o.product || 'N/D'
+    if (!skuMap[key]) skuMap[key] = {
+      sku: o.sku, product: o.product, brand: o.brand_name,
+      nOrdini: 0, pzRim: 0, ricavo: 0, costo: 0, margine: 0
+    }
+    skuMap[key].nOrdini++
+    skuMap[key].pzRim   += o.pzRim
+    skuMap[key].ricavo  += o.forecastRicavo
+    skuMap[key].costo   += o.forecastCosto
+    skuMap[key].margine += o.forecastMargine
+  })
+  const skuRows = Object.values(skuMap).sort((a, b) => b.ricavo - a.ricavo)
+
   return (
     <div>
       <div style={{ marginBottom: 16, padding: '10px 16px', background: 'var(--ice-light)', borderRadius: 10, border: '1px solid var(--ice)' }}>
@@ -322,49 +338,45 @@ function Forecast({ orders, lines }) {
 
       <div className="card">
         <div className="card-header" style={{ padding: '20px 24px 16px' }}>
-          <div className="card-title">Dettaglio forecast per ordine</div>
-          <div className="card-sub">Ordini aperti con scadenza entro il {currentYear}</div>
+          <div className="card-title">Dettaglio forecast per codice articolo</div>
+          <div className="card-sub">Raggruppato per SKU — ordini aperti con scadenza entro il {currentYear}</div>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Ordine</th><th>Prodotto</th><th>Brand</th><th>Scadenza</th>
-                <th>Pz rimanenti</th><th>Ricavo atteso</th><th>Costo atteso</th><th>Margine</th>
+                <th>Cod. Articolo</th><th>Prodotto</th><th>Brand</th>
+                <th>Nr. Ordini</th><th>Pz rimanenti</th>
+                <th>Ricavo atteso</th><th>Costo atteso</th><th>Margine</th>
               </tr>
             </thead>
             <tbody>
-              {data.sort((a,b) => {
-                if (!a.due_date) return 1
-                if (!b.due_date) return -1
-                return new Date(a.due_date) - new Date(b.due_date)
-              }).map(o => (
-                <tr key={o.id}>
-                  <td><span className="mono">{o.order_code}</span></td>
-                  <td className="font-medium">{o.product}</td>
-                  <td>{o.brand_name ?? '—'}</td>
-                  <td style={{ fontSize: 12,
-                    color: o.due_date && new Date(o.due_date) < new Date() ? 'var(--danger)' : 'var(--gray-700)' }}>
-                    {o.due_date ? new Date(o.due_date).toLocaleDateString('it-IT') : '—'}
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{o.pzRim.toLocaleString()}</td>
-                  <td style={{ color: 'var(--blue)', fontWeight: 500 }}>
-                    {o.forecastRicavo > 0 ? `€ ${fmt(o.forecastRicavo)}` : '—'}
-                  </td>
-                  <td style={{ color: 'var(--warning)' }}>
-                    {o.forecastCosto > 0 ? `€ ${fmt(o.forecastCosto)}` : '—'}
-                  </td>
-                  <td style={{ fontWeight: 600,
-                    color: o.forecastMargine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                    {o.forecastRicavo > 0 ? `€ ${fmt(o.forecastMargine)}` : '—'}
-                    {o.forecastMarginePct !== null && o.forecastRicavo > 0 && (
-                      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--gray-500)', marginLeft: 4 }}>
-                        ({fmt(o.forecastMarginePct)}%)
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {skuRows.map((s, i) => {
+                const mPct = s.ricavo > 0 ? (s.margine / s.ricavo) * 100 : null
+                return (
+                  <tr key={i}>
+                    <td><span className="mono">{s.sku || '—'}</span></td>
+                    <td className="font-medium">{s.product}</td>
+                    <td>{s.brand ?? '—'}</td>
+                    <td style={{ textAlign: 'center' }}>{s.nOrdini}</td>
+                    <td style={{ fontWeight: 600 }}>{s.pzRim.toLocaleString()}</td>
+                    <td style={{ color: 'var(--blue)', fontWeight: 500 }}>
+                      {s.ricavo > 0 ? `€ ${fmt(s.ricavo)}` : '—'}
+                    </td>
+                    <td style={{ color: 'var(--warning)' }}>
+                      {s.costo > 0 ? `€ ${fmt(s.costo)}` : '—'}
+                    </td>
+                    <td style={{ fontWeight: 600, color: s.margine >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                      {s.ricavo > 0 ? `€ ${fmt(s.margine)}` : '—'}
+                      {mPct !== null && s.ricavo > 0 && (
+                        <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--gray-500)', marginLeft: 4 }}>
+                          ({fmt(mPct)}%)
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
