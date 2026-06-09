@@ -50,11 +50,36 @@ function ProgressBar({ done, total }) {
 
 // ─── Advance Modal ───────────────────────────────────────────
 function AdvanceModal({ order, lines, onClose, onSaved }) {
-  const [qty, setQty]       = useState('')
-  const [note, setNote]     = useState('')
-  const [lineId, setLineId] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
+  const [qty, setQty]             = useState('')
+  const [note, setNote]           = useState('')
+  const [lineId, setLineId]       = useState('')
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState('')
+  const [compatLines, setCompatLines] = useState(null) // null = loading
+
+  useEffect(() => {
+    async function loadCompat() {
+      if (!order.product_id) {
+        // Nessun product_id: mostra tutte le linee attive
+        setCompatLines(lines)
+        return
+      }
+      const { data } = await supabase
+        .from('line_product_compatibility')
+        .select('line_id')
+        .eq('product_id', order.product_id)
+      if (!data || data.length === 0) {
+        // Nessuna compatibilità configurata: mostra tutte con avviso
+        setCompatLines(lines)
+      } else {
+        const compatIds = new Set(data.map(r => r.line_id))
+        setCompatLines(lines.filter(l => compatIds.has(l.id)))
+      }
+    }
+    loadCompat()
+  }, [order.product_id])
+
+  const displayLines = compatLines ?? lines
 
   const handle = async () => {
     const q = parseInt(qty)
@@ -103,11 +128,24 @@ function AdvanceModal({ order, lines, onClose, onSaved }) {
               style={{ borderColor: !qty ? 'var(--gray-100)' : 'inherit' }} />
           </div>
           <div className="form-group">
-            <label className="form-label">Linea di produzione <span style={{ color: 'var(--danger)' }}>*</span></label>
+            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Linea di produzione <span style={{ color: 'var(--danger)' }}>*</span></span>
+              {compatLines !== null && compatLines.length < lines.length && (
+                <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 400 }}>
+                  {compatLines.length} compatibili su {lines.length}
+                </span>
+              )}
+              {compatLines !== null && compatLines.length === lines.length && order.product_id && (
+                <span style={{ fontSize: 11, color: 'var(--gray-400)', fontWeight: 400 }}>tutte le linee</span>
+              )}
+            </label>
             <select className="form-select" value={lineId} onChange={e => setLineId(e.target.value)}
-              style={{ borderColor: !lineId ? 'var(--danger)' : 'inherit' }}>
-              <option value="">— Seleziona linea —</option>
-              {lines.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              style={{ borderColor: !lineId ? 'var(--danger)' : 'inherit' }}
+              disabled={compatLines === null}>
+              <option value="">
+                {compatLines === null ? 'Caricamento...' : '— Seleziona linea —'}
+              </option>
+              {displayLines.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
           </div>
           <div className="form-group">
@@ -469,7 +507,7 @@ function TabOrders() {
           ))}
         </div>
 
-        <div className="table-wrap">
+        <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--gray-100)' }}>
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-500)' }}>Caricamento...</div>
           ) : filtered.length === 0 ? (
@@ -479,66 +517,93 @@ function TabOrders() {
               <div className="empty-sub">Prova a cambiare i filtri o importa un file Excel</div>
             </div>
           ) : (
-            <table>
+            <table style={{ minWidth: 1400 }}>
               <thead>
                 <tr>
-                  <th style={{ width: 36 }}>
+                  <th style={{ position: 'sticky', left: 0, background: 'white', zIndex: 3, width: 32, padding: '10px 6px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} />
                   </th>
-                  <th>Ordine</th>
-                  <th>Commessa</th>
-                  <th>Desc. Commessa</th>
-                  <th>Cod. Articolo</th>
-                  <th>Prodotto</th>
-                  <th>Brand</th>
-                  <th>Scadenza</th>
-                  <th>Stato</th>
-                  <th>Pz fatti / Totale</th>
-                  <th>Pianificati / Totale</th>
-                  <th></th>
+                  <th style={{ position: 'sticky', left: 32, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>Ordine</th>
+                  <th style={{ position: 'sticky', left: 148, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>Commessa</th>
+                  <th style={{ position: 'sticky', left: 258, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>Cod. Art.</th>
+                  <th style={{ position: 'sticky', left: 348, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '3px 0 6px rgba(0,0,0,0.08)' }}>Scadenza</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Prodotto</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Brand</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Stato</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Pz fatti</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Pianificati</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Desc. Commessa</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Collezione</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Colore</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Taglia</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Rifinitura</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Ubicazione</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Bollettina</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>PO Number</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Prior.</th>
+                  <th style={{ position: 'sticky', right: 0, background: 'white', zIndex: 3, boxShadow: '-3px 0 6px rgba(0,0,0,0.08)', padding: '10px 8px' }}></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(o => (
                   <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
-                    <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} /></td>
-                    <td><span className="mono">{o.order_code}</span></td>
-                    <td style={{ whiteSpace: 'nowrap' }}><span className="mono" style={{ fontSize: 11 }}>{o.commessa_code || '—'}</span></td>
-                    <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      <span className="text-sm text-muted">{o.order_description || '—'}</span>
+                    <td style={{ position: 'sticky', left: 0, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, padding: '8px 6px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
+                      <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} />
                     </td>
-                    <td><span className="mono">{o.sku || '—'}</span></td>
-                    <td style={{ maxWidth: 160 }}>
-                      <div className="font-medium" style={{ fontSize: 13 }}>{o.product || '—'}</div>
+                    <td style={{ position: 'sticky', left: 32, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
+                      <span className="mono" style={{ fontSize: 12 }}>{o.order_code}</span>
                     </td>
-                    <td>{o.brand_name ?? '—'}</td>
-                    <td>
+                    <td style={{ position: 'sticky', left: 148, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
+                      <span className="mono" style={{ fontSize: 11 }}>{o.commessa_code || '—'}</span>
+                    </td>
+                    <td style={{ position: 'sticky', left: 258, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
+                      <span className="mono" style={{ fontSize: 11 }}>{o.sku || '—'}</span>
+                    </td>
+                    <td style={{ position: 'sticky', left: 348, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '3px 0 6px rgba(0,0,0,0.08)' }}>
                       {o.due_date ? (
-                        <span style={{
-                          fontSize: 12, fontWeight: 500,
+                        <span style={{ fontSize: 12, fontWeight: 500,
                           color: new Date(o.due_date) < new Date() && o.status !== 'completed'
-                            ? 'var(--danger)' : 'var(--gray-700)'
-                        }}>
+                            ? 'var(--danger)' : 'var(--gray-700)' }}>
                           {new Date(o.due_date).toLocaleDateString('it-IT')}
                         </span>
                       ) : '—'}
                     </td>
-                    <td><span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span></td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--blue)', fontSize: 13 }}>
+                    <td style={{ maxWidth: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '8px 8px' }}>
+                      <div className="font-medium" style={{ fontSize: 12 }}>{o.product || '—'}</div>
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', fontSize: 12 }}>{o.brand_name ?? '—'}</td>
+                    <td style={{ padding: '8px 8px' }}><span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span></td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--blue)', fontSize: 12 }}>
                         {(o.quantity_produced || 0).toLocaleString('it-IT')}
                       </span>
-                      <span className="text-muted" style={{ fontSize: 12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
+                      <span className="text-muted" style={{ fontSize: 11 }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
                     </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--success)', fontSize: 13 }}>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--success)', fontSize: 12 }}>
                         {(o.quantity_assigned || 0).toLocaleString('it-IT')}
                       </span>
-                      <span className="text-muted" style={{ fontSize: 12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
+                      <span className="text-muted" style={{ fontSize: 11 }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
                     </td>
-
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '8px 8px', fontSize: 12, color: 'var(--gray-500)' }}>
+                      {o.order_description || '—'}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', fontSize: 12 }}>{o.collection || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
+                      <span className="mono" style={{ fontSize: 11 }}>{o.color_code || '—'}</span>
+                      {o.color_description && <span style={{ fontSize: 10, color: 'var(--gray-400)', marginLeft: 3 }}>{o.color_description}</span>}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
+                      {o.size_code ? <span className="mono" style={{ fontSize: 11 }}>{o.size_code}</span> : '—'}
+                      {o.size_description && <span style={{ fontSize: 10, color: 'var(--gray-400)', marginLeft: 3 }}>{o.size_description}</span>}
+                    </td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', fontSize: 12 }}>{o.finishing || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}><span className="mono" style={{ fontSize: 11 }}>{o.location_code || '—'}</span></td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}><span className="mono" style={{ fontSize: 11 }}>{o.bollettina_nr || '—'}</span></td>
+                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}><span className="mono" style={{ fontSize: 11 }}>{o.po_number || '—'}</span></td>
+                    <td style={{ textAlign: 'center', padding: '8px 8px', fontSize: 12 }}>{o.priority ?? '—'}</td>
+                    <td style={{ position: 'sticky', right: 0, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, padding: '8px 8px', boxShadow: '-3px 0 6px rgba(0,0,0,0.08)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 74 }}>
                         {o.status !== 'completed' && (
                           <button className="btn btn-primary btn-sm" onClick={() => setAdvancing(o)}>Avanza</button>
                         )}
