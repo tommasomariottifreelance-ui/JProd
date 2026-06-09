@@ -529,14 +529,14 @@ function TabOrders() {
                   <th style={{ position:'sticky', left:262, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Cod. Articolo</th>
                   <th style={{ position:'sticky', left:362, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'3px 0 6px rgba(0,0,0,0.08)' }}>Scadenza</th>
                   {/* ── visibili ── */}
-                  <th>Prodotto</th>
+                  <th style={{ whiteSpace:'nowrap' }}>Prodotto</th>
+                  <th style={{ whiteSpace:'nowrap' }}>Desc. Commessa</th>
                   <th>Brand</th>
                   <th>Stato</th>
-                  <th style={{ whiteSpace:'nowrap' }}>Pz fatti / Totale</th>
-                  <th style={{ whiteSpace:'nowrap' }}>Pianificati / Totale</th>
+                  <th>Avanzati</th>
+                  <th>Pianificati</th>
                   <th style={{ whiteSpace:'nowrap' }}></th>
                   {/* ── scroll destra ── */}
-                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Desc. Commessa</th>
                   <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Collezione</th>
                   <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Colore</th>
                   <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Taglia</th>
@@ -580,22 +580,27 @@ function TabOrders() {
                       ) : '—'}
                     </td>
                     {/* visibili */}
-                    <td style={{ maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <td style={{ whiteSpace:'nowrap', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis' }}
+                      title={o.product || ''}>
                       <div className="font-medium" style={{ fontSize:13 }}>{o.product || '—'}</div>
                     </td>
-                    <td>{o.brand_name ?? '—'}</td>
+                    <td style={{ maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--gray-600)', fontSize:12 }}
+                      title={o.order_description || ''}>
+                      {o.order_description || '—'}
+                    </td>
+                    <td style={{ whiteSpace:'nowrap' }}>{o.brand_name ?? '—'}</td>
                     <td><span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span></td>
-                    <td style={{ whiteSpace:'nowrap' }}>
+                    <td style={{ whiteSpace:'nowrap', textAlign:'right' }}>
                       <span style={{ fontWeight:600, color:'var(--blue)', fontSize:13 }}>
                         {(o.quantity_produced || 0).toLocaleString('it-IT')}
                       </span>
-                      <span className="text-muted" style={{ fontSize:12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
+                      <span className="text-muted" style={{ fontSize:11 }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
                     </td>
-                    <td style={{ whiteSpace:'nowrap' }}>
+                    <td style={{ whiteSpace:'nowrap', textAlign:'right' }}>
                       <span style={{ fontWeight:600, color:'var(--success)', fontSize:13 }}>
                         {(o.quantity_assigned || 0).toLocaleString('it-IT')}
                       </span>
-                      <span className="text-muted" style={{ fontSize:12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
+                      <span className="text-muted" style={{ fontSize:11 }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
                     </td>
                     <td style={{ whiteSpace:'nowrap' }}>
                       <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
@@ -606,9 +611,6 @@ function TabOrders() {
                       </div>
                     </td>
                     {/* scroll destra */}
-                    <td style={{ maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--gray-500)', fontSize:12 }}>
-                      {o.order_description || '—'}
-                    </td>
                     <td style={{ whiteSpace:'nowrap', fontSize:12, color:'var(--gray-500)' }}>{o.collection || '—'}</td>
                     <td style={{ whiteSpace:'nowrap', fontSize:12 }}>
                       <span className="mono" style={{ fontSize:11 }}>{o.color_code || '—'}</span>
