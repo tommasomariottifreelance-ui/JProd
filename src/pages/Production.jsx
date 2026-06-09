@@ -517,101 +517,115 @@ function TabOrders() {
               <div className="empty-sub">Prova a cambiare i filtri o importa un file Excel</div>
             </div>
           ) : (
-            <table style={{ minWidth: 1400 }}>
+            <table style={{ minWidth: 1200, borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  <th style={{ position: 'sticky', left: 0, background: 'white', zIndex: 3, width: 32, padding: '10px 6px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: 'pointer' }} />
+                  {/* ── sticky sinistra ── */}
+                  <th style={{ position:'sticky', left:0, zIndex:3, background:'white', width:32, padding:'10px 6px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>
+                    <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor:'pointer' }} />
                   </th>
-                  <th style={{ position: 'sticky', left: 32, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>Ordine</th>
-                  <th style={{ position: 'sticky', left: 148, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>Commessa</th>
-                  <th style={{ position: 'sticky', left: 258, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>Cod. Art.</th>
-                  <th style={{ position: 'sticky', left: 348, background: 'white', zIndex: 3, whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11, boxShadow: '3px 0 6px rgba(0,0,0,0.08)' }}>Scadenza</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Prodotto</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Brand</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Stato</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Pz fatti</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Pianificati</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Desc. Commessa</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Collezione</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Colore</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Taglia</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Rifinitura</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Ubicazione</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Bollettina</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>PO Number</th>
-                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px', fontSize: 11 }}>Prior.</th>
-                  <th style={{ position: 'sticky', right: 0, background: 'white', zIndex: 3, boxShadow: '-3px 0 6px rgba(0,0,0,0.08)', padding: '10px 8px' }}></th>
+                  <th style={{ position:'sticky', left:32, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Ordine</th>
+                  <th style={{ position:'sticky', left:152, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Commessa</th>
+                  <th style={{ position:'sticky', left:262, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Cod. Articolo</th>
+                  <th style={{ position:'sticky', left:362, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'3px 0 6px rgba(0,0,0,0.08)' }}>Scadenza</th>
+                  {/* ── visibili ── */}
+                  <th>Prodotto</th>
+                  <th>Brand</th>
+                  <th>Stato</th>
+                  <th style={{ whiteSpace:'nowrap' }}>Pz fatti / Totale</th>
+                  <th style={{ whiteSpace:'nowrap' }}>Pianificati / Totale</th>
+                  <th style={{ whiteSpace:'nowrap' }}></th>
+                  {/* ── scroll destra ── */}
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Desc. Commessa</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Collezione</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Colore</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Taglia</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Rifinitura</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Ubicazione</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Bollettina</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>PO Number</th>
+                  <th style={{ whiteSpace:'nowrap', color:'var(--gray-400)' }}>Priority</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(o => (
+                {filtered.map(o => {
+                  const bg = selected.has(o.id) ? 'var(--ice-light)' : 'white'
+                  const stickyCell = (left, shadow) => ({
+                    position: 'sticky', left, zIndex: 1, background: bg,
+                    whiteSpace: 'nowrap', padding: '8px 8px',
+                    boxShadow: shadow || '2px 0 3px rgba(0,0,0,0.04)'
+                  })
+                  return (
                   <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
-                    <td style={{ position: 'sticky', left: 0, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, padding: '8px 6px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
-                      <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} />
+                    {/* sticky */}
+                    <td style={{ position:'sticky', left:0, zIndex:1, background:bg, padding:'8px 6px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>
+                      <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor:'pointer' }} />
                     </td>
-                    <td style={{ position: 'sticky', left: 32, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
-                      <span className="mono" style={{ fontSize: 12 }}>{o.order_code}</span>
+                    <td style={stickyCell(32)}>
+                      <span className="mono">{o.order_code}</span>
                     </td>
-                    <td style={{ position: 'sticky', left: 148, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
-                      <span className="mono" style={{ fontSize: 11 }}>{o.commessa_code || '—'}</span>
+                    <td style={stickyCell(152)}>
+                      <span className="mono" style={{ fontSize:11 }}>{o.commessa_code || '—'}</span>
                     </td>
-                    <td style={{ position: 'sticky', left: 258, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
-                      <span className="mono" style={{ fontSize: 11 }}>{o.sku || '—'}</span>
+                    <td style={stickyCell(262)}>
+                      <span className="mono" style={{ fontSize:11 }}>{o.sku || '—'}</span>
                     </td>
-                    <td style={{ position: 'sticky', left: 348, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, whiteSpace: 'nowrap', padding: '8px 8px', boxShadow: '3px 0 6px rgba(0,0,0,0.08)' }}>
+                    <td style={stickyCell(362, '3px 0 6px rgba(0,0,0,0.08)')}>
                       {o.due_date ? (
-                        <span style={{ fontSize: 12, fontWeight: 500,
+                        <span style={{ fontSize:12, fontWeight:500,
                           color: new Date(o.due_date) < new Date() && o.status !== 'completed'
                             ? 'var(--danger)' : 'var(--gray-700)' }}>
                           {new Date(o.due_date).toLocaleDateString('it-IT')}
                         </span>
                       ) : '—'}
                     </td>
-                    <td style={{ maxWidth: 140, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '8px 8px' }}>
-                      <div className="font-medium" style={{ fontSize: 12 }}>{o.product || '—'}</div>
+                    {/* visibili */}
+                    <td style={{ maxWidth:160, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      <div className="font-medium" style={{ fontSize:13 }}>{o.product || '—'}</div>
                     </td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', fontSize: 12 }}>{o.brand_name ?? '—'}</td>
-                    <td style={{ padding: '8px 8px' }}><span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span></td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--blue)', fontSize: 12 }}>
+                    <td>{o.brand_name ?? '—'}</td>
+                    <td><span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span></td>
+                    <td style={{ whiteSpace:'nowrap' }}>
+                      <span style={{ fontWeight:600, color:'var(--blue)', fontSize:13 }}>
                         {(o.quantity_produced || 0).toLocaleString('it-IT')}
                       </span>
-                      <span className="text-muted" style={{ fontSize: 11 }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
+                      <span className="text-muted" style={{ fontSize:12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
                     </td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
-                      <span style={{ fontWeight: 600, color: 'var(--success)', fontSize: 12 }}>
+                    <td style={{ whiteSpace:'nowrap' }}>
+                      <span style={{ fontWeight:600, color:'var(--success)', fontSize:13 }}>
                         {(o.quantity_assigned || 0).toLocaleString('it-IT')}
                       </span>
-                      <span className="text-muted" style={{ fontSize: 11 }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
+                      <span className="text-muted" style={{ fontSize:12 }}> / {(o.quantity || 0).toLocaleString('it-IT')} pz</span>
                     </td>
-                    <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', padding: '8px 8px', fontSize: 12, color: 'var(--gray-500)' }}>
-                      {o.order_description || '—'}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', fontSize: 12 }}>{o.collection || '—'}</td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
-                      <span className="mono" style={{ fontSize: 11 }}>{o.color_code || '—'}</span>
-                      {o.color_description && <span style={{ fontSize: 10, color: 'var(--gray-400)', marginLeft: 3 }}>{o.color_description}</span>}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
-                      {o.size_code ? <span className="mono" style={{ fontSize: 11 }}>{o.size_code}</span> : '—'}
-                      {o.size_description && <span style={{ fontSize: 10, color: 'var(--gray-400)', marginLeft: 3 }}>{o.size_description}</span>}
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', fontSize: 12 }}>{o.finishing || '—'}</td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}><span className="mono" style={{ fontSize: 11 }}>{o.location_code || '—'}</span></td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}><span className="mono" style={{ fontSize: 11 }}>{o.bollettina_nr || '—'}</span></td>
-                    <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}><span className="mono" style={{ fontSize: 11 }}>{o.po_number || '—'}</span></td>
-                    <td style={{ textAlign: 'center', padding: '8px 8px', fontSize: 12 }}>{o.priority ?? '—'}</td>
-                    <td style={{ position: 'sticky', right: 0, background: selected.has(o.id) ? 'var(--ice-light)' : 'white', zIndex: 1, padding: '8px 8px', boxShadow: '-3px 0 6px rgba(0,0,0,0.08)' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 74 }}>
+                    <td style={{ whiteSpace:'nowrap' }}>
+                      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                         {o.status !== 'completed' && (
                           <button className="btn btn-primary btn-sm" onClick={() => setAdvancing(o)}>Avanza</button>
                         )}
                         <button className="btn btn-danger btn-sm" onClick={() => setDeleting(o)}>Elimina</button>
                       </div>
                     </td>
+                    {/* scroll destra */}
+                    <td style={{ maxWidth:200, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', color:'var(--gray-500)', fontSize:12 }}>
+                      {o.order_description || '—'}
+                    </td>
+                    <td style={{ whiteSpace:'nowrap', fontSize:12, color:'var(--gray-500)' }}>{o.collection || '—'}</td>
+                    <td style={{ whiteSpace:'nowrap', fontSize:12 }}>
+                      <span className="mono" style={{ fontSize:11 }}>{o.color_code || '—'}</span>
+                      {o.color_description && <span style={{ fontSize:10, color:'var(--gray-400)', marginLeft:3 }}>{o.color_description}</span>}
+                    </td>
+                    <td style={{ whiteSpace:'nowrap', fontSize:12 }}>
+                      {o.size_code ? <span className="mono" style={{ fontSize:11 }}>{o.size_code}</span> : '—'}
+                      {o.size_description && <span style={{ fontSize:10, color:'var(--gray-400)', marginLeft:3 }}>{o.size_description}</span>}
+                    </td>
+                    <td style={{ whiteSpace:'nowrap', fontSize:12, color:'var(--gray-500)' }}>{o.finishing || '—'}</td>
+                    <td style={{ whiteSpace:'nowrap' }}><span className="mono" style={{ fontSize:11, color:'var(--gray-500)' }}>{o.location_code || '—'}</span></td>
+                    <td style={{ whiteSpace:'nowrap' }}><span className="mono" style={{ fontSize:11, color:'var(--gray-500)' }}>{o.bollettina_nr || '—'}</span></td>
+                    <td style={{ whiteSpace:'nowrap' }}><span className="mono" style={{ fontSize:11, color:'var(--gray-500)' }}>{o.po_number || '—'}</span></td>
+                    <td style={{ textAlign:'center', fontSize:12, color:'var(--gray-500)' }}>{o.priority ?? '—'}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           )}
