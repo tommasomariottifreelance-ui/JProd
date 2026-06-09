@@ -507,7 +507,7 @@ function TabOrders() {
           ))}
         </div>
 
-        <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--gray-100)' }}>
+        <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid var(--gray-100)', isolation: 'isolate' }}>
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--gray-500)' }}>Caricamento...</div>
           ) : filtered.length === 0 ? (
@@ -517,17 +517,17 @@ function TabOrders() {
               <div className="empty-sub">Prova a cambiare i filtri o importa un file Excel</div>
             </div>
           ) : (
-            <table style={{ minWidth: 1200, borderCollapse: 'collapse' }}>
+            <table style={{ minWidth: 1200, borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr>
                   {/* ── sticky sinistra ── */}
-                  <th style={{ position:'sticky', left:0, zIndex:3, background:'white', width:32, padding:'10px 6px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>
+                  <th style={{ position:'sticky', left:0, zIndex:4, background:'#FFFFFF', width:32, padding:'10px 6px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor:'pointer' }} />
                   </th>
-                  <th style={{ position:'sticky', left:32, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Ordine</th>
-                  <th style={{ position:'sticky', left:152, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Commessa</th>
-                  <th style={{ position:'sticky', left:262, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Cod. Articolo</th>
-                  <th style={{ position:'sticky', left:362, zIndex:3, background:'white', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'3px 0 6px rgba(0,0,0,0.08)' }}>Scadenza</th>
+                  <th style={{ position:'sticky', left:32, zIndex:4, background:'#FFFFFF', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Ordine</th>
+                  <th style={{ position:'sticky', left:152, zIndex:4, background:'#FFFFFF', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Commessa</th>
+                  <th style={{ position:'sticky', left:262, zIndex:4, background:'#FFFFFF', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>Cod. Articolo</th>
+                  <th style={{ position:'sticky', left:362, zIndex:4, background:'#FFFFFF', whiteSpace:'nowrap', padding:'10px 8px', boxShadow:'3px 0 6px rgba(0,0,0,0.08)' }}>Scadenza</th>
                   {/* ── visibili ── */}
                   <th style={{ whiteSpace:'nowrap' }}>Prodotto</th>
                   <th style={{ whiteSpace:'nowrap' }}>Desc. Commessa</th>
@@ -549,16 +549,16 @@ function TabOrders() {
               </thead>
               <tbody>
                 {filtered.map(o => {
-                  const bg = selected.has(o.id) ? 'var(--ice-light)' : 'white'
+                  const bg = selected.has(o.id) ? '#EBF2FA' : '#FFFFFF'
                   const stickyCell = (left, shadow) => ({
-                    position: 'sticky', left, zIndex: 1, background: bg,
+                    position: 'sticky', left, zIndex: 2, background: bg,
                     whiteSpace: 'nowrap', padding: '8px 8px',
-                    boxShadow: shadow || '2px 0 3px rgba(0,0,0,0.04)'
+                    boxShadow: shadow || '2px 0 3px rgba(0,0,0,0.06)'
                   })
                   return (
                   <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
                     {/* sticky */}
-                    <td style={{ position:'sticky', left:0, zIndex:1, background:bg, padding:'8px 6px', boxShadow:'2px 0 3px rgba(0,0,0,0.04)' }}>
+                    <td style={{ position:'sticky', left:0, zIndex:2, background:bg, padding:'8px 6px', boxShadow:'2px 0 3px rgba(0,0,0,0.06)' }}>
                       <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor:'pointer' }} />
                     </td>
                     <td style={stickyCell(32)}>
@@ -580,7 +580,7 @@ function TabOrders() {
                       ) : '—'}
                     </td>
                     {/* visibili */}
-                    <td style={{ whiteSpace:'nowrap', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis' }}
+                    <td style={{ minWidth:130, maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}
                       title={o.product || ''}>
                       <div className="font-medium" style={{ fontSize:13 }}>{o.product || '—'}</div>
                     </td>
