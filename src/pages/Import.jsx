@@ -83,13 +83,14 @@ export default function Import() {
   const doImport = async () => {
     setImporting(true)
     try {
-      // ── 1. client_id (1 query) ──
-      const { data: profileData } = await supabase
-        .from('users_profiles').select('client_id').maybeSingle()
+      // ── 1. Letture iniziali indipendenti IN PARALLELO (1 round-trip invece di 3) ──
+      const [{ data: profileData }, { data: allBrands }, { data: allProductsInit }] = await Promise.all([
+        supabase.from('users_profiles').select('client_id').maybeSingle(),
+        supabase.from('brands').select('id, name'),
+        supabase.from('products').select('id, sku, name, selling_price'),
+      ])
       const client_id = profileData?.client_id ?? null
 
-      // ── 2. Brands: carica tutti, crea i mancanti in batch (2-3 query) ──
-      const { data: allBrands } = await supabase.from('brands').select('id, name')
       const brandMap = {}
       ;(allBrands || []).forEach(b => { brandMap[b.name.toLowerCase().trim()] = b.id })
 
@@ -106,9 +107,8 @@ export default function Import() {
         ;(newBrands || []).forEach(b => { brandMap[b.name.toLowerCase().trim()] = b.id })
       }
 
-      // ── 3. Products: carica tutti, crea i mancanti in batch (2-3 query) ──
-      const { data: allProducts } = await supabase
-        .from('products').select('id, sku, name, selling_price')
+      // ── 2. Products: indici da lettura già fatta sopra ──
+      const allProducts = allProductsInit
       const prodBySku  = {}
       const prodByName = {}
       ;(allProducts || []).forEach(p => {
