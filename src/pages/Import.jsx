@@ -82,152 +82,169 @@ export default function Import() {
 
   const doImport = async () => {
     setImporting(true)
-    let inserted = 0, updated = 0, skipped = 0
+    try {
+      // ── 1. client_id (1 query) ──
+      const { data: profileData } = await supabase
+        .from('users_profiles').select('client_id').maybeSingle()
+      const client_id = profileData?.client_id ?? null
 
-    // Recupera client_id dal profilo utente loggato
-    const { data: profileData } = await supabase
-      .from('users_profiles')
-      .select('client_id')
-      .maybeSingle()
-    const client_id = profileData?.client_id ?? null
+      // ── 2. Brands: carica tutti, crea i mancanti in batch (2-3 query) ──
+      const { data: allBrands } = await supabase.from('brands').select('id, name')
+      const brandMap = {}
+      ;(allBrands || []).forEach(b => { brandMap[b.name.toLowerCase().trim()] = b.id })
 
-    for (const row of rows) {
-      // Determina status in base alle quantità
-      let status = 'planned'
-      if (row.quantity_done > 0 && row.quantity_done < row.quantity) status = 'in_production'
-      if (row.quantity_done >= row.quantity && row.quantity > 0) status = 'completed'
-
-      // Cerca o crea brand — maybeSingle() evita errore 406
-      let brand_id = null
-      if (row.brand_name) {
-        const { data: b } = await supabase
-          .from('brands').select('id')
-          .ilike('name', row.brand_name)
-          .maybeSingle()
-        if (b) {
-          brand_id = b.id
-        } else {
-          const { data: nb } = await supabase
-            .from('brands')
-            .insert({ name: row.brand_name, client_id })
-            .select('id')
-            .maybeSingle()
-          if (nb) brand_id = nb.id
-        }
+      const missingBrands = [...new Set(
+        rows.map(r => r.brand_name).filter(Boolean)
+          .map(n => n.trim())
+          .filter(n => !brandMap[n.toLowerCase()])
+      )]
+      if (missingBrands.length > 0) {
+        const { data: newBrands } = await supabase
+          .from('brands')
+          .insert(missingBrands.map(name => ({ name, client_id })))
+          .select('id, name')
+        ;(newBrands || []).forEach(b => { brandMap[b.name.toLowerCase().trim()] = b.id })
       }
 
-      // Cerca o crea prodotto — SKU è la chiave univoca, nome è descrizione
-      let product_id = null
-      if (row.sku || row.product) {
-        let prod = null
+      // ── 3. Products: carica tutti, crea i mancanti in batch (2-3 query) ──
+      const { data: allProducts } = await supabase
+        .from('products').select('id, sku, name, selling_price')
+      const prodBySku  = {}
+      const prodByName = {}
+      ;(allProducts || []).forEach(p => {
+        if (p.sku) prodBySku[p.sku.toLowerCase().trim()] = p
+        if (p.name) prodByName[p.name.toLowerCase().trim()] = p
+      })
 
-        // 1. Cerca per SKU (chiave univoca)
+      const findProduct = (row) => {
         if (row.sku) {
-          const { data: bysku } = await supabase
-            .from('products').select('id, sku, name')
-            .eq('sku', row.sku.toString().trim())
-            .eq('client_id', client_id)
-            .maybeSingle()
-          prod = bysku
+          const p = prodBySku[row.sku.toString().toLowerCase().trim()]
+          if (p) return p
         }
+        if (row.product) {
+          const p = prodByName[row.product.toLowerCase().trim()]
+          if (p) return p
+        }
+        return null
+      }
 
-        if (prod) {
-          product_id = prod.id
-          // Aggiorna nome se è cambiato
-          if (row.product && prod.name !== row.product.trim()) {
-            await supabase.from('products')
-              .update({ name: row.product.trim() })
-              .eq('id', prod.id)
+      // Prodotti nuovi da creare (dedup per SKU)
+      const newProductsMap = {}
+      rows.forEach(row => {
+        if (!row.sku && !row.product) return
+        if (findProduct(row)) return
+        const key = row.sku ? row.sku.toString().trim() : row.product.trim()
+        if (!newProductsMap[key]) {
+          newProductsMap[key] = {
+            sku: row.sku ? row.sku.toString().trim() : null,
+            name: row.product ? row.product.trim() : row.sku.toString().trim(),
+            selling_price: row.listino ?? null,
+            brand_id: row.brand_name ? brandMap[row.brand_name.toLowerCase().trim()] ?? null : null,
+            client_id,
           }
-        } else {
-          // Prodotto non trovato → crea nuovo con SKU come identificatore
-          const { data: newprod } = await supabase
-            .from('products')
-            .insert({
-              sku: row.sku ? row.sku.toString().trim() : null,
-              name: row.product ? row.product.trim() : row.sku,
-              selling_price: row.listino ?? null,
-              brand_id,
-              client_id,
-            })
-            .select('id')
-            .maybeSingle()
-          if (newprod) product_id = newprod.id
         }
+      })
+      const newProducts = Object.values(newProductsMap)
+      if (newProducts.length > 0) {
+        const { data: created } = await supabase
+          .from('products').insert(newProducts).select('id, sku, name, selling_price')
+        ;(created || []).forEach(p => {
+          if (p.sku) prodBySku[p.sku.toLowerCase().trim()] = p
+          if (p.name) prodByName[p.name.toLowerCase().trim()] = p
+        })
       }
 
-      // Payload ordine — senza quantity_remaining (calcolata dalla VIEW)
-      const payload = {
-        order_code: row.order_code,
-        commessa_code: row.commessa_code,
-        order_description: row.order_description,
-        product: row.product,
-        sku: row.sku ? row.sku.toString().trim() : null,
-        brand_id,
-        product_id,
-        client_id,
-        collection: row.collection,
-        reference_nr: row.reference_nr,
-        color_code: row.color_code,
-        color_description: row.color_description,
-        size_code: row.size_code,
-        size_description: row.size_description,
-        finishing: row.finishing,
-        location_code: row.location_code,
-        bollettina_nr: row.bollettina_nr ? row.bollettina_nr.toString() : null,
-        po_number: row.po_number ? row.po_number.toString() : null,
-        priority: row.priority,
-        week: row.week,
-        due_date: row.due_date,
-        quantity: row.quantity,
-        quantity_done: row.quantity_done,
-        status,
-      }
+      // Aggiorna listino dei prodotti esistenti se cambiato (in parallelo, pochi SKU unici)
+      const priceUpdates = {}
+      rows.forEach(row => {
+        const p = findProduct(row)
+        if (p && row.listino && row.listino > 0 && parseFloat(p.selling_price || 0) !== row.listino) {
+          priceUpdates[p.id] = row.listino
+        }
+      })
+      await Promise.all(
+        Object.entries(priceUpdates).map(([id, price]) =>
+          supabase.from('products').update({ selling_price: price }).eq('id', id)
+        )
+      )
 
-      // Aggiorna selling_price se presente nel listino Excel (sempre, per mantenere aggiornato)
-      if (product_id && row.listino && row.listino > 0) {
-        await supabase.from('products')
-          .update({ selling_price: row.listino })
-          .eq('id', product_id)
-      }
+      // ── 4. Ordini: upsert batch in UNA chiamata (2 query) ──
+      const orderCodes = rows.map(r => r.order_code).filter(Boolean)
+      const { data: existingOrders } = await supabase
+        .from('orders').select('order_code')
+        .in('order_code', orderCodes)
+      const existingSet = new Set((existingOrders || []).map(o => o.order_code))
 
-      // Upsert: aggiorna se esiste, inserisce se nuovo
-      const { data: existing } = await supabase
-        .from('orders').select('id')
-        .eq('order_code', row.order_code)
-        .maybeSingle()
+      const payloads = rows.filter(r => r.order_code).map(row => {
+        let status = 'planned'
+        if (row.quantity_done > 0 && row.quantity_done < row.quantity) status = 'in_production'
+        if (row.quantity_done >= row.quantity && row.quantity > 0) status = 'completed'
+        const prod = findProduct(row)
+        return {
+          order_code: row.order_code,
+          commessa_code: row.commessa_code,
+          order_description: row.order_description,
+          product: row.product,
+          sku: row.sku ? row.sku.toString().trim() : null,
+          brand_id: row.brand_name ? brandMap[row.brand_name.toLowerCase().trim()] ?? null : null,
+          product_id: prod?.id ?? null,
+          client_id,
+          collection: row.collection,
+          reference_nr: row.reference_nr,
+          color_code: row.color_code,
+          color_description: row.color_description,
+          size_code: row.size_code,
+          size_description: row.size_description,
+          finishing: row.finishing,
+          location_code: row.location_code,
+          bollettina_nr: row.bollettina_nr ? row.bollettina_nr.toString() : null,
+          po_number: row.po_number ? row.po_number.toString() : null,
+          priority: row.priority,
+          week: row.week,
+          due_date: row.due_date,
+          quantity: row.quantity,
+          quantity_done: row.quantity_done,
+          status,
+        }
+      })
 
-      let order_id = null
-      if (existing) {
-        await supabase.from('orders').update(payload).eq('id', existing.id)
-        order_id = existing.id
-        updated++
-      } else {
-        const { data: newOrder, error } = await supabase
-          .from('orders').insert(payload).select('id').maybeSingle()
-        if (!error && newOrder) { order_id = newOrder.id; inserted++ } else { skipped++ }
-      }
+      const { data: upserted, error: upsertError } = await supabase
+        .from('orders')
+        .upsert(payloads, { onConflict: 'order_code,client_id' })
+        .select('id, order_code, quantity_done, due_date')
 
-      // Opzione A: se quantity_done > 0 crea log iniziale per alimentare la VIEW
-      // Controlla prima che non esista già un log (evita duplicati su reimport)
-      if (order_id && row.quantity_done > 0) {
-        const { data: existingLog } = await supabase
-          .from('production_log').select('id')
-          .eq('order_id', order_id)
-          .maybeSingle()
-        if (!existingLog) {
-          await supabase.from('production_log').insert({
-            order_id,
-            produced_qt: row.quantity_done,
-            date: row.due_date ?? new Date().toISOString().split('T')[0],
+      if (upsertError) throw upsertError
+
+      const inserted = payloads.filter(p => !existingSet.has(p.order_code)).length
+      const updated  = payloads.length - inserted
+
+      // ── 5. Log iniziali per ordini con quantity_done > 0 (2 query) ──
+      const ordersNeedingLog = (upserted || []).filter(o => (o.quantity_done || 0) > 0)
+      if (ordersNeedingLog.length > 0) {
+        const orderIds = ordersNeedingLog.map(o => o.id)
+        const { data: existingLogs } = await supabase
+          .from('production_log').select('order_id')
+          .in('order_id', orderIds)
+        const loggedSet = new Set((existingLogs || []).map(l => l.order_id))
+        const newLogs = ordersNeedingLog
+          .filter(o => !loggedSet.has(o.id))
+          .map(o => ({
+            order_id: o.id,
+            produced_qt: o.quantity_done,
+            date: o.due_date ?? new Date().toISOString().split('T')[0],
             operator: 'import Excel',
             client_id,
-          })
+          }))
+        if (newLogs.length > 0) {
+          await supabase.from('production_log').insert(newLogs)
         }
       }
-    }
 
-    setResult({ inserted, updated, skipped })
+      setResult({ inserted, updated, skipped: rows.length - payloads.length })
+    } catch (err) {
+      console.error('Import error:', err)
+      setResult({ inserted: 0, updated: 0, skipped: 0, error: err.message || 'Errore sconosciuto durante l\'import' })
+    }
     setImporting(false)
   }
 
@@ -336,7 +353,17 @@ export default function Import() {
           </>
         )}
 
-        {result && (
+        {result && result.error && (
+          <div className="card card-body" style={{ background: '#FEF0EE', border: '1px solid #F0B0A8' }}>
+            <div style={{ fontWeight: 600, color: 'var(--danger)', marginBottom: 8 }}>✗ Errore durante l'import</div>
+            <div className="text-sm" style={{ color: 'var(--gray-700)' }}>{result.error}</div>
+            <div className="text-xs text-muted" style={{ marginTop: 8 }}>
+              Se l'errore riguarda "no unique constraint", esegui su Supabase l'indice univoco indicato nella documentazione del progetto.
+            </div>
+          </div>
+        )}
+
+        {result && !result.error && (
           <div className="card card-body" style={{ background: '#E8F8F2', border: '1px solid #A8DFC8' }}>
             <div style={{ fontWeight: 600, color: 'var(--success)', marginBottom: 8 }}>✓ Import completato</div>
             <div className="text-sm" style={{ display: 'flex', gap: 24 }}>

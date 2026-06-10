@@ -849,15 +849,19 @@ function TabPlanning() {
 
   const approvePlan = async () => {
     if (!draftPlan) return
-    for (const item of draftPlan.plan) {
-      await supabase.from('order_line_assignments').insert({
-        order_id:          item.order_id,
-        line_id:           item.line_id,
-        week_number:       item.week_number,
-        year:              item.year,
-        quantity_assigned: item.quantity_assigned,
-        client_id:         profile?.client_id,
-      })
+    // Insert batch: una sola chiamata invece di N
+    const records = draftPlan.plan.map(item => ({
+      order_id:          item.order_id,
+      line_id:           item.line_id,
+      week_number:       item.week_number,
+      year:              item.year,
+      quantity_assigned: item.quantity_assigned,
+      client_id:         profile?.client_id,
+    }))
+    const { error } = await supabase.from('order_line_assignments').insert(records)
+    if (error) {
+      alert('Errore nel salvataggio del piano: ' + error.message)
+      return
     }
     setDraftPlan(null)
     load()
@@ -865,11 +869,15 @@ function TabPlanning() {
 
   const deleteWeekAssignments = async (week, year) => {
     if (!window.confirm(`Eliminare tutte le assegnazioni della settimana W${week} ${year}?`)) return
-    await supabase
+    const { error } = await supabase
       .from('order_line_assignments')
       .delete()
       .eq('week_number', week)
       .eq('year', year)
+    if (error) {
+      alert('Errore eliminazione: ' + error.message)
+      return
+    }
     load()
   }
 
