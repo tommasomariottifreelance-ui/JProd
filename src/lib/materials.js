@@ -1,0 +1,91 @@
+// ============================================================
+// Logica semaforo materiali — fasi di produzione
+// ============================================================
+
+// Mappa categoria materiale → fase di produzione
+export const PHASE_CATEGORIES = {
+  taglio:     ['MP-01', 'MP-15'],
+  montaggio:  ['MP-30', 'MP-45', 'MP-50', 'MP-55'],
+  rifinitura: ['MP-70', 'MP-80'],
+}
+
+export const PHASE_LABELS = {
+  taglio:     'Taglio',
+  montaggio:  'Montaggio',
+  rifinitura: 'Rifinitura',
+}
+
+export const PHASE_ORDER = ['taglio', 'montaggio', 'rifinitura']
+
+// Colori semaforo
+export const STATUS_COLORS = {
+  verde:  '#1A9E6E',
+  giallo: '#D4820A',
+  rosso:  '#E5484D',
+  vuoto:  '#C8D2DC',  // nessun materiale per quella fase
+}
+
+// Determina la fase di una categoria materiale
+function categoryToPhase(categoryCode) {
+  if (!categoryCode) return null
+  const code = categoryCode.toUpperCase().trim()
+  for (const [phase, cats] of Object.entries(PHASE_CATEGORIES)) {
+    if (cats.includes(code)) return phase
+  }
+  return null
+}
+
+// Stato di una singola riga materiale (per percentuale arrivata)
+// ≥90% verde, 70-90% giallo, <70% rosso
+function rowStatus(qtyBase, qtyInevaso) {
+  const base = parseFloat(qtyBase || 0)
+  if (base <= 0) return 'verde' // nessuna quantità richiesta = ok
+  const arrivata = base - parseFloat(qtyInevaso || 0)
+  const pct = (arrivata / base) * 100
+  if (pct >= 90) return 'verde'
+  if (pct >= 70) return 'giallo'
+  return 'rosso'
+}
+
+// Peggiore tra due stati (anello debole)
+function worstStatus(a, b) {
+  const rank = { verde: 0, giallo: 1, rosso: 2 }
+  return rank[a] >= rank[b] ? a : b
+}
+
+// Calcola lo stato delle 3 fasi per un set di materiali di un ordine
+// materials = array di { category_code, qty_base, qty_inevaso }
+// Ritorna { taglio: 'verde'|'giallo'|'rosso'|'vuoto', montaggio: ..., rifinitura: ... }
+export function computePhaseStatus(materials) {
+  const result = { taglio: 'vuoto', montaggio: 'vuoto', rifinitura: 'vuoto' }
+  const hasRows = { taglio: false, montaggio: false, rifinitura: false }
+
+  for (const m of materials) {
+    const phase = categoryToPhase(m.category_code)
+    if (!phase) continue
+    const status = rowStatus(m.qty_base, m.qty_inevaso)
+    if (!hasRows[phase]) {
+      result[phase] = status
+      hasRows[phase] = true
+    } else {
+      result[phase] = worstStatus(result[phase], status)
+    }
+  }
+  return result
+}
+
+// Raggruppa materiali per order_code e calcola le fasi per ciascun ordine
+// Ritorna { [order_code]: { taglio, montaggio, rifinitura } }
+export function computeOrderPhases(allMaterials) {
+  const byOrder = {}
+  for (const m of allMaterials) {
+    if (!m.order_code) continue
+    if (!byOrder[m.order_code]) byOrder[m.order_code] = []
+    byOrder[m.order_code].push(m)
+  }
+  const result = {}
+  for (const [code, mats] of Object.entries(byOrder)) {
+    result[code] = computePhaseStatus(mats)
+  }
+  return result
+}

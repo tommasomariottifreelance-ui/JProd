@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { computeOrderPhases, PHASE_ORDER, PHASE_LABELS, STATUS_COLORS } from '../lib/materials'
 import { useAuth } from '../components/AuthContext'
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -394,6 +395,34 @@ function AssignPanel({ cell, orders, lines, onClose, onSaved, clientId }) {
 }
 
 // ─── TAB: ORDINI ─────────────────────────────────────────────
+// ─── Semaforo materiali (3 fasi) ─────────────────────────────
+function MaterialSemaforo({ phases }) {
+  if (!phases) {
+    return <span style={{ fontSize: 11, color: 'var(--gray-300)' }}>—</span>
+  }
+  const PHASE_INITIALS = { taglio: 'T', montaggio: 'M', rifinitura: 'R' }
+  return (
+    <div style={{ display: 'flex', gap: 4 }}>
+      {PHASE_ORDER.map(phase => {
+        const status = phases[phase] || 'vuoto'
+        const color = STATUS_COLORS[status]
+        return (
+          <div key={phase}
+            title={`${PHASE_LABELS[phase]}: ${status === 'vuoto' ? 'nessun materiale' : status}`}
+            style={{
+              width: 20, height: 20, borderRadius: 5, background: color,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, color: status === 'vuoto' ? 'var(--gray-500)' : 'white',
+              cursor: 'default'
+            }}>
+            {PHASE_INITIALS[phase]}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function TabOrders() {
   const [orders, setOrders]     = useState([])
   const [loading, setLoading]   = useState(true)
@@ -406,15 +435,18 @@ function TabOrders() {
   const [deleting, setDeleting]   = useState(null)
   const [selected, setSelected]   = useState(new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
+  const [orderPhases, setOrderPhases] = useState({})  // { order_code: {taglio, montaggio, rifinitura} }
 
   const load = useCallback(async () => {
-    const [{ data }, { data: linesData }] = await Promise.all([
+    const [{ data }, { data: linesData }, { data: materials }] = await Promise.all([
       supabase.from('orders_with_totals').select('*').order('due_date', { ascending: true }),
-      supabase.from('production_lines').select('id, name').eq('active', true).order('name')
+      supabase.from('production_lines').select('id, name').eq('active', true).order('name'),
+      supabase.from('order_materials').select('order_code, category_code, qty_base, qty_inevaso')
     ])
     setOrders(data || [])
     setLines(linesData || [])
     setBrands([...new Set((data || []).map(o => o.brand_name).filter(Boolean))])
+    setOrderPhases(computeOrderPhases(materials || []))
     setSelected(new Set())
     setLoading(false)
   }, [])
@@ -531,6 +563,7 @@ function TabOrders() {
                   <th style={{ whiteSpace: 'nowrap', padding: '10px 8px' }}>Desc. Commessa</th>
                   <th style={{ whiteSpace: 'nowrap', padding: '10px 8px' }}>Brand</th>
                   <th style={{ whiteSpace: 'nowrap', padding: '10px 8px' }}>Stato</th>
+                  <th style={{ whiteSpace: 'nowrap', padding: '10px 8px' }}>Materiali</th>
                   <th style={{ whiteSpace: 'nowrap', padding: '10px 8px' }}>Avanzati</th>
                   <th style={{ whiteSpace: 'nowrap', padding: '10px 8px' }}>Pianificati</th>
                   <th style={{ padding: '10px 8px' }}></th>
@@ -579,6 +612,9 @@ function TabOrders() {
                     <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>{o.brand_name ?? '—'}</td>
                     <td style={{ padding: '8px 8px' }}>
                       <span className={`badge badge-${o.status || 'planned'}`}>{STATUS_LABELS[o.status] || o.status}</span>
+                    </td>
+                    <td style={{ padding: '8px 8px', whiteSpace: 'nowrap' }}>
+                      <MaterialSemaforo phases={orderPhases[o.order_code]} />
                     </td>
                     <td style={{ whiteSpace: 'nowrap', padding: '8px 8px', textAlign: 'right' }}>
                       <span style={{ fontWeight: 600, color: 'var(--blue)' }}>{(o.quantity_produced || 0).toLocaleString('it-IT')}</span>
@@ -657,10 +693,14 @@ function TabOrders() {
 
 // ─── ALGORITMO PIANIFICAZIONE ────────────────────────────────
 async function generatePlan(orders, lines, existingAssignments, weeks, clientId, saturationPct = 85) {
-  // 1. Carica compatibilità linea-prodotto
+  // 1. Carica compatibilità linea-prodotto e stato materiali
   const { supabase } = await import('../lib/supabase')
-  const { data: compat } = await supabase
-    .from('line_product_compatibility').select('line_id, product_id')
+  const [{ data: compat }, { data: materials }] = await Promise.all([
+    supabase.from('line_product_compatibility').select('line_id, product_id'),
+    supabase.from('order_materials').select('order_code, category_code, qty_base, qty_inevaso'),
+  ])
+  // Calcola fasi materiali per ordine (vincolo: fase taglio non deve essere rossa)
+  const orderPhases = computeOrderPhases(materials || [])
   const compatMap = {}
   ;(compat || []).forEach(c => {
     if (!compatMap[c.product_id]) compatMap[c.product_id] = new Set()
@@ -711,6 +751,9 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
   })
 
   // 5. Ordina ordini per scadenza — escludi quelli già completamente coperti
+  // Raccogli ordini esclusi per materiali mancanti (fase taglio rossa)
+  const materialBlocked = []
+
   const toplan = orders
     .filter(o => o.status === 'planned' || (o.status === 'in_production' && (o.quantity_remaining || 0) > 0))
     .filter(o => {
@@ -718,6 +761,15 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
       const qPlanned = alreadyPlanned[o.id] || 0
       // Salta se già pianificato completamente
       return qRem > 0 && qPlanned < qRem
+    })
+    .filter(o => {
+      // Vincolo materiali: se la fase TAGLIO è rossa, l'ordine non può iniziare
+      const phases = orderPhases[o.order_code]
+      if (phases && phases.taglio === 'rosso') {
+        materialBlocked.push(o.order_code)
+        return false
+      }
+      return true
     })
     .map(o => ({
       ...o,
@@ -789,6 +841,11 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
     if (remaining > 0) {
       warnings.push(`${order.order_code}: ${remaining} pz non pianificabili (capacità insufficiente nelle settimane disponibili)`)
     }
+  })
+
+  // Aggiungi warning per ordini bloccati da materiali
+  materialBlocked.forEach(code => {
+    warnings.push(`${code}: escluso — materiali fase Taglio non disponibili (semaforo rosso)`)
   })
 
   return { plan, warnings }

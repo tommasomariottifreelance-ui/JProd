@@ -14,10 +14,17 @@ function parseDate(val) {
 }
 
 export default function Import() {
+  const [tab, setTab] = useState('ordini')
   const [rows, setRows] = useState([])
   const [validation, setValidation] = useState([])
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState(null)
+  // Materiali
+  const [matRows, setMatRows] = useState([])
+  const [matImporting, setMatImporting] = useState(false)
+  const [matResult, setMatResult] = useState(null)
+  const [matDrag, setMatDrag] = useState(false)
+  const matFileRef = useRef()
   const [drag, setDrag] = useState(false)
   const fileRef = useRef()
 
@@ -248,16 +255,104 @@ export default function Import() {
     setImporting(false)
   }
 
+  // ── MATERIALI ──────────────────────────────────────────────
+  const processMatFile = (file) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const wb = XLSX.read(e.target.result, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const data = XLSX.utils.sheet_to_json(ws, { defval: null })
+      const mapped = data.map((r, i) => ({
+        _row: i + 2,
+        order_code:    r['Nr. ordine produzione'],
+        category_code: r['Codice categoria articolo'],
+        material_code: r['Nr. articolo'] ? r['Nr. articolo'].toString() : null,
+        material_desc: r['Descrizione'],
+        color_desc:    r['Descrizione colore'],
+        qty_base:      parseFloat(r['Quantità (base)']) || 0,
+        qty_inevaso:   parseFloat(r['Qtà inevasa (base)']) || 0,
+        supplier_nr:   r['Nr. Fornitore'] ? r['Nr. Fornitore'].toString() : null,
+      })).filter(r => r.order_code)
+      setMatRows(mapped)
+      setMatResult(null)
+    }
+    reader.readAsArrayBuffer(file)
+  }
+
+  const handleMatFile = (e) => {
+    const f = e.target.files[0]
+    if (f) processMatFile(f)
+  }
+  const handleMatDrop = (e) => {
+    e.preventDefault(); setMatDrag(false)
+    const f = e.dataTransfer.files[0]
+    if (f) processMatFile(f)
+  }
+
+  const doMatImport = async () => {
+    setMatImporting(true)
+    try {
+      const { data: profileData } = await supabase
+        .from('users_profiles').select('client_id').maybeSingle()
+      const client_id = profileData?.client_id ?? null
+
+      // Fotografia: cancella i materiali esistenti del cliente e reinserisce
+      await supabase.from('order_materials').delete().eq('client_id', client_id)
+
+      const payloads = matRows.map(m => ({
+        client_id,
+        order_code:    m.order_code,
+        category_code: m.category_code,
+        material_code: m.material_code,
+        material_desc: m.material_desc,
+        color_desc:    m.color_desc,
+        qty_base:      m.qty_base,
+        qty_inevaso:   m.qty_inevaso,
+        supplier_nr:   m.supplier_nr,
+      }))
+
+      // Insert in blocchi da 500 per evitare payload troppo grandi
+      let inserted = 0
+      for (let i = 0; i < payloads.length; i += 500) {
+        const chunk = payloads.slice(i, i + 500)
+        const { error } = await supabase.from('order_materials').insert(chunk)
+        if (error) throw error
+        inserted += chunk.length
+      }
+
+      const distinctOrders = new Set(matRows.map(m => m.order_code)).size
+      setMatResult({ inserted, orders: distinctOrders })
+    } catch (err) {
+      console.error('Import materiali error:', err)
+      setMatResult({ inserted: 0, orders: 0, error: err.message })
+    }
+    setMatImporting(false)
+  }
+
   return (
     <div>
       <div className="topbar">
         <div>
           <div className="topbar-title">Import Excel</div>
-          <div className="topbar-sub">Carica il file ordini di produzione</div>
+          <div className="topbar-sub">Carica i file di produzione e materiali</div>
         </div>
       </div>
 
+      <div style={{ borderBottom: '1px solid var(--gray-100)', background: 'white', padding: '0 32px', display: 'flex' }}>
+        {[['ordini','Ordini di produzione'],['materiali','Stato materiali']].map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            padding: '14px 20px', border: 'none', background: 'none', cursor: 'pointer',
+            fontFamily: 'var(--font)', fontSize: 14, fontWeight: tab === key ? 600 : 400,
+            color: tab === key ? 'var(--blue)' : 'var(--gray-500)',
+            borderBottom: `2px solid ${tab === key ? 'var(--blue)' : 'transparent'}`,
+            marginBottom: -1
+          }}>{label}</button>
+        ))}
+      </div>
+
       <div className="page-content">
+       {tab === 'ordini' && (
+        <>
         <div className="card card-body" style={{ marginBottom: 20 }}>
           <div
             className={`upload-zone ${drag ? 'drag' : ''}`}
@@ -373,6 +468,92 @@ export default function Import() {
             </div>
           </div>
         )}
+        </>
+       )}
+
+       {tab === 'materiali' && (
+        <>
+          <div className="card card-body" style={{ marginBottom: 20 }}>
+            <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--ice-light)', borderRadius: 8, fontSize: 13, color: 'var(--blue)' }}>
+              Il file materiali è una <strong>fotografia</strong>: ogni import sostituisce completamente lo stato precedente.
+              I semafori negli Ordini si aggiornano di conseguenza.
+            </div>
+            <div
+              className={`upload-zone ${matDrag ? 'drag' : ''}`}
+              onDragOver={e => { e.preventDefault(); setMatDrag(true) }}
+              onDragLeave={() => setMatDrag(false)}
+              onDrop={handleMatDrop}
+              onClick={() => matFileRef.current.click()}>
+              <input ref={matFileRef} type="file" accept=".xlsx,.xls" hidden onChange={handleMatFile} />
+              <div className="upload-zone-icon">⊕</div>
+              <div className="upload-zone-title">Trascina il file materiali qui</div>
+              <div className="upload-zone-sub">oppure clicca per selezionarlo · .xlsx / .xls</div>
+            </div>
+          </div>
+
+          {matRows.length > 0 && (
+            <div className="card mb-4">
+              <div className="card-header">
+                <div>
+                  <div className="card-title">Anteprima materiali ({matRows.length} righe)</div>
+                  <div className="card-sub">{new Set(matRows.map(m => m.order_code)).size} ordini coinvolti</div>
+                </div>
+                <button className="btn btn-primary" onClick={doMatImport} disabled={matImporting}>
+                  {matImporting ? 'Importazione...' : `Importa stato materiali`}
+                </button>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ordine</th><th>Categoria</th><th>Materiale</th>
+                      <th>Colore</th><th>Qtà</th><th>Inevaso</th><th>%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matRows.slice(0, 50).map((m, i) => {
+                      const pct = m.qty_base > 0 ? Math.round((m.qty_base - m.qty_inevaso) / m.qty_base * 100) : 100
+                      const col = pct >= 90 ? 'var(--success)' : pct >= 70 ? 'var(--warning)' : 'var(--danger)'
+                      return (
+                        <tr key={i}>
+                          <td><span className="mono" style={{ fontSize: 12 }}>{m.order_code}</span></td>
+                          <td><span className="mono" style={{ fontSize: 11 }}>{m.category_code || '—'}</span></td>
+                          <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{m.material_desc || '—'}</td>
+                          <td style={{ fontSize: 12 }}>{m.color_desc || '—'}</td>
+                          <td style={{ fontSize: 12 }}>{m.qty_base}</td>
+                          <td style={{ fontSize: 12 }}>{m.qty_inevaso}</td>
+                          <td style={{ fontWeight: 600, color: col, fontSize: 12 }}>{pct}%</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {matRows.length > 50 && (
+                  <div className="text-sm text-muted" style={{ padding: '12px 16px', textAlign: 'center' }}>
+                    ...e altre {matRows.length - 50} righe
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {matResult && matResult.error && (
+            <div className="card card-body" style={{ background: '#FEF0EE', border: '1px solid #F0B0A8' }}>
+              <div style={{ fontWeight: 600, color: 'var(--danger)', marginBottom: 8 }}>✗ Errore import materiali</div>
+              <div className="text-sm">{matResult.error}</div>
+            </div>
+          )}
+          {matResult && !matResult.error && (
+            <div className="card card-body" style={{ background: '#E8F8F2', border: '1px solid #A8DFC8' }}>
+              <div style={{ fontWeight: 600, color: 'var(--success)', marginBottom: 8 }}>✓ Stato materiali aggiornato</div>
+              <div className="text-sm" style={{ display: 'flex', gap: 24 }}>
+                <span>Righe importate: <strong>{matResult.inserted}</strong></span>
+                <span>Ordini coinvolti: <strong>{matResult.orders}</strong></span>
+              </div>
+            </div>
+          )}
+        </>
+       )}
       </div>
     </div>
   )
