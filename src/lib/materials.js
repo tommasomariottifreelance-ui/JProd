@@ -58,7 +58,11 @@ function worstStatus(a, b) {
 // materials = array di { category_code, qty_base, qty_inevaso }
 // Ritorna { taglio: 'verde'|'giallo'|'rosso'|'vuoto', montaggio: ..., rifinitura: ... }
 export function computePhaseStatus(materials) {
-  const result = { taglio: 'vuoto', montaggio: 'vuoto', rifinitura: 'vuoto' }
+  // Questa funzione viene chiamata solo per OPR PRESENTI nel file materiali
+  // (la distinta è arrivata). Quindi una fase senza righe significa che i suoi
+  // materiali sono già stati tutti consegnati e il brand li ha rimossi dal file:
+  // in tal caso la fase è VERDE (completata), non 'vuoto'.
+  const result = { taglio: 'verde', montaggio: 'verde', rifinitura: 'verde' }
   const hasRows = { taglio: false, montaggio: false, rifinitura: false }
 
   for (const m of materials) {
