@@ -31,9 +31,10 @@ export default function Import() {
   const matFileRef = useRef()
 
   const loadImportLog = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('import_log').select('*')
-      .order('created_at', { ascending: false }).limit(5)
+      .order('created_at', { ascending: false }).limit(10)
+    if (error) { console.error('loadImportLog error:', error); return }
     setImportLog(data || [])
   }
   useEffect(() => { loadImportLog() }, [])
@@ -270,13 +271,14 @@ export default function Import() {
       setArchiveCandidates(disappeared)
 
       // Log import
-      await supabase.from('import_log').insert({
+      const { error: logErr } = await supabase.from('import_log').insert({
         client_id, import_type: 'ordini',
-        file_name: fileName, rows_count: payloads.length, orders_count: payloads.length
+        file_name: fileName || 'file.xlsx', rows_count: payloads.length, orders_count: payloads.length
       })
+      if (logErr) console.error('import_log insert error (ordini):', logErr)
 
       setResult({ inserted, updated, skipped: rows.length - payloads.length, disappeared: disappeared.length })
-      loadImportLog()
+      await loadImportLog()
     } catch (err) {
       console.error('Import error:', err)
       setResult({ inserted: 0, updated: 0, skipped: 0, error: err.message || 'Errore sconosciuto durante l\'import' })
@@ -378,13 +380,14 @@ export default function Import() {
       }
 
       // Log import
-      await supabase.from('import_log').insert({
+      const { error: logErr } = await supabase.from('import_log').insert({
         client_id, import_type: 'materiali',
-        file_name: matFileName, rows_count: inserted, orders_count: distinctOrders.length
+        file_name: matFileName || 'materiali.xlsx', rows_count: inserted, orders_count: distinctOrders.length
       })
+      if (logErr) console.error('import_log insert error (materiali):', logErr)
 
       setMatResult({ inserted, orders: distinctOrders.length })
-      loadImportLog()
+      await loadImportLog()
     } catch (err) {
       console.error('Import materiali error:', err)
       setMatResult({ inserted: 0, orders: 0, error: err.message })

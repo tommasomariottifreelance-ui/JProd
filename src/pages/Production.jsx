@@ -796,10 +796,12 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
         }
         return true
       }
-      // Assente dai materiali: se già visto = completati (ok), se mai visto = distinta non ricevuta
+      // Assente dai materiali:
+      // - già visto in passato = materiali completati → pianificabile
+      // - mai visto = distinta non ricevuta → BLOCCA (come taglio rosso)
       if (!seenSet.has(o.order_code)) {
         materialAwaiting.push(o.order_code)
-        // Non bloccante: l'ordine può essere pianificato, ma segnalato
+        return false
       }
       return true
     })
@@ -880,7 +882,7 @@ async function generatePlan(orders, lines, existingAssignments, weeks, clientId,
     warnings.push(`${code}: escluso — materiali fase Taglio non disponibili (semaforo rosso)`)
   })
   materialAwaiting.forEach(code => {
-    warnings.push(`${code}: pianificato ma distinta materiali non ancora ricevuta dal brand`)
+    warnings.push(`${code}: escluso — distinta materiali non ancora ricevuta dal brand (MP da ricevere)`)
   })
 
   return { plan, warnings }
