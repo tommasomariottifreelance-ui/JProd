@@ -23,6 +23,7 @@ export const STATUS_COLORS = {
   giallo: '#D4820A',
   rosso:  '#E5484D',
   vuoto:  '#C8D2DC',  // nessun materiale per quella fase
+  attesa: '#94A3B8',  // MP da ricevere (mai vista distinta)
 }
 
 // Determina la fase di una categoria materiale
@@ -88,4 +89,23 @@ export function computeOrderPhases(allMaterials) {
     result[code] = computePhaseStatus(mats)
   }
   return result
+}
+
+
+// Risolve lo stato di visualizzazione di un ordine considerando i 3 casi:
+//   caso materiali presenti → semaforo normale per fase
+//   caso 1 (assente ma già visto in passato) → tutte verdi (materiali consegnati)
+//   caso 2 (assente e mai visto) → stato 'attesa' (MP da ricevere)
+// Ritorna { mode: 'phases'|'all_green'|'awaiting', phases?: {...} }
+export function resolveOrderMaterialState(orderCode, phasesMap, seenSet) {
+  const phases = phasesMap[orderCode]
+  if (phases) {
+    return { mode: 'phases', phases }
+  }
+  if (seenSet && seenSet.has(orderCode)) {
+    // Caso 1: materiali completati
+    return { mode: 'all_green', phases: { taglio: 'verde', montaggio: 'verde', rifinitura: 'verde' } }
+  }
+  // Caso 2: distinta mai ricevuta
+  return { mode: 'awaiting' }
 }

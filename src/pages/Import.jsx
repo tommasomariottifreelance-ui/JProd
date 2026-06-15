@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 
@@ -19,12 +19,24 @@ export default function Import() {
   const [validation, setValidation] = useState([])
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState(null)
+  const [fileName, setFileName] = useState('')
+  const [archiveCandidates, setArchiveCandidates] = useState([])  // OPR spariti
+  const [importLog, setImportLog] = useState([])
   // Materiali
   const [matRows, setMatRows] = useState([])
   const [matImporting, setMatImporting] = useState(false)
   const [matResult, setMatResult] = useState(null)
   const [matDrag, setMatDrag] = useState(false)
+  const [matFileName, setMatFileName] = useState('')
   const matFileRef = useRef()
+
+  const loadImportLog = async () => {
+    const { data } = await supabase
+      .from('import_log').select('*')
+      .order('created_at', { ascending: false }).limit(5)
+    setImportLog(data || [])
+  }
+  useEffect(() => { loadImportLog() }, [])
   const [drag, setDrag] = useState(false)
   const fileRef = useRef()
 
@@ -78,13 +90,13 @@ export default function Import() {
 
   const handleFile = (e) => {
     const f = e.target.files[0]
-    if (f) processFile(f)
+    if (f) { setFileName(f.name); processFile(f) }
   }
 
   const handleDrop = (e) => {
     e.preventDefault(); setDrag(false)
     const f = e.dataTransfer.files[0]
-    if (f) processFile(f)
+    if (f) { setFileName(f.name); processFile(f) }
   }
 
   const doImport = async () => {
@@ -247,12 +259,44 @@ export default function Import() {
         }
       }
 
-      setResult({ inserted, updated, skipped: rows.length - payloads.length })
+      // Rileva OPR spariti: presenti in DB (non archiviati) ma assenti dal nuovo file
+      const importedCodes = new Set(payloads.map(p => p.order_code))
+      const { data: dbOrders } = await supabase
+        .from('orders').select('order_code')
+        .eq('client_id', client_id).eq('archived', false)
+      const disappeared = [...new Set((dbOrders || [])
+        .map(o => o.order_code)
+        .filter(code => !importedCodes.has(code)))]
+      setArchiveCandidates(disappeared)
+
+      // Log import
+      await supabase.from('import_log').insert({
+        client_id, import_type: 'ordini',
+        file_name: fileName, rows_count: payloads.length, orders_count: payloads.length
+      })
+
+      setResult({ inserted, updated, skipped: rows.length - payloads.length, disappeared: disappeared.length })
+      loadImportLog()
     } catch (err) {
       console.error('Import error:', err)
       setResult({ inserted: 0, updated: 0, skipped: 0, error: err.message || 'Errore sconosciuto durante l\'import' })
     }
     setImporting(false)
+  }
+
+  // ── Archiviazione OPR spariti ──────────────────────────────
+  const archiveDisappeared = async () => {
+    if (archiveCandidates.length === 0) return
+    const { data: profileData } = await supabase
+      .from('users_profiles').select('client_id').maybeSingle()
+    const client_id = profileData?.client_id ?? null
+    const { error } = await supabase
+      .from('orders')
+      .update({ archived: true, archived_at: new Date().toISOString() })
+      .eq('client_id', client_id)
+      .in('order_code', archiveCandidates)
+    if (error) { alert('Errore archiviazione: ' + error.message); return }
+    setArchiveCandidates([])
   }
 
   // ── MATERIALI ──────────────────────────────────────────────
@@ -281,12 +325,12 @@ export default function Import() {
 
   const handleMatFile = (e) => {
     const f = e.target.files[0]
-    if (f) processMatFile(f)
+    if (f) { setMatFileName(f.name); processMatFile(f) }
   }
   const handleMatDrop = (e) => {
     e.preventDefault(); setMatDrag(false)
     const f = e.dataTransfer.files[0]
-    if (f) processMatFile(f)
+    if (f) { setMatFileName(f.name); processMatFile(f) }
   }
 
   const doMatImport = async () => {
@@ -320,8 +364,27 @@ export default function Import() {
         inserted += chunk.length
       }
 
-      const distinctOrders = new Set(matRows.map(m => m.order_code)).size
-      setMatResult({ inserted, orders: distinctOrders })
+      const distinctOrders = [...new Set(matRows.map(m => m.order_code))]
+
+      // Memoria additiva OPR visti nei materiali (per discriminante semaforo)
+      const { data: alreadySeen } = await supabase
+        .from('materials_seen_opr').select('order_code').eq('client_id', client_id)
+      const seenSet = new Set((alreadySeen || []).map(s => s.order_code))
+      const newSeen = distinctOrders
+        .filter(code => !seenSet.has(code))
+        .map(code => ({ client_id, order_code: code }))
+      if (newSeen.length > 0) {
+        await supabase.from('materials_seen_opr').insert(newSeen)
+      }
+
+      // Log import
+      await supabase.from('import_log').insert({
+        client_id, import_type: 'materiali',
+        file_name: matFileName, rows_count: inserted, orders_count: distinctOrders.length
+      })
+
+      setMatResult({ inserted, orders: distinctOrders.length })
+      loadImportLog()
     } catch (err) {
       console.error('Import materiali error:', err)
       setMatResult({ inserted: 0, orders: 0, error: err.message })
@@ -468,6 +531,35 @@ export default function Import() {
             </div>
           </div>
         )}
+
+        {archiveCandidates.length > 0 && (
+          <div className="card card-body" style={{ marginTop: 16, background: '#FFF8EC', border: '1px solid #F5C880' }}>
+            <div style={{ fontWeight: 600, color: 'var(--warning)', marginBottom: 6 }}>
+              ⚠ {archiveCandidates.length} ordini non sono più presenti nel file
+            </div>
+            <div className="text-sm text-muted" style={{ marginBottom: 12 }}>
+              Questi ordini erano presenti in precedenza ma non compaiono nel file appena importato.
+              Probabilmente sono stati annullati dal brand. Vuoi archiviarli? Resteranno nello storico
+              e nei report economici, ma spariranno dalla lista ordini attivi.
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+              {archiveCandidates.map(code => (
+                <span key={code} className="mono" style={{ fontSize: 11, padding: '2px 8px',
+                  background: 'white', borderRadius: 6, border: '1px solid var(--gray-100)' }}>{code}</span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" onClick={archiveDisappeared}>
+                Archivia {archiveCandidates.length} ordini
+              </button>
+              <button className="btn btn-secondary" onClick={() => setArchiveCandidates([])}>
+                Ignora per ora
+              </button>
+            </div>
+          </div>
+        )}
+
+        <ImportLogPanel log={importLog} type="ordini" />
         </>
        )}
 
@@ -552,8 +644,45 @@ export default function Import() {
               </div>
             </div>
           )}
+
+          <ImportLogPanel log={importLog} type="materiali" />
         </>
        )}
+      </div>
+    </div>
+  )
+}
+
+
+// ─── Storico import (ultimi 5) ──────────────────────────────
+function ImportLogPanel({ log, type }) {
+  const filtered = (log || []).filter(l => l.import_type === type)
+  if (filtered.length === 0) return null
+  return (
+    <div className="card" style={{ marginTop: 20 }}>
+      <div className="card-header" style={{ padding: '16px 20px 12px' }}>
+        <div className="card-title" style={{ fontSize: 14 }}>Ultimi import</div>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Data e ora</th><th>File</th><th>Righe</th><th>Ordini</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(l => (
+              <tr key={l.id}>
+                <td style={{ fontSize: 12 }}>{new Date(l.created_at).toLocaleString('it-IT')}</td>
+                <td style={{ fontSize: 12, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {l.file_name || '—'}
+                </td>
+                <td style={{ fontSize: 12 }}>{l.rows_count}</td>
+                <td style={{ fontSize: 12 }}>{l.orders_count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
