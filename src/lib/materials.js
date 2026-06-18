@@ -113,3 +113,61 @@ export function resolveOrderMaterialState(orderCode, phasesMap, seenSet) {
   // Caso 2: distinta mai ricevuta
   return { mode: 'awaiting' }
 }
+
+
+// Raggruppa le righe materiale di UN ordine per fase, con dettaglio per riga.
+// Riutilizzabile sia dal drill-down sia da una futura pagina dedicata.
+// materials = righe di order_materials per quell'order_code
+// Ritorna: { taglio: { status, rows: [...] }, montaggio: {...}, rifinitura: {...}, altro: {...} }
+export function groupMaterialsByPhase(materials) {
+  const groups = {
+    taglio:     { status: 'verde', rows: [] },
+    montaggio:  { status: 'verde', rows: [] },
+    rifinitura: { status: 'verde', rows: [] },
+  }
+  // Materiali non mappati ad alcuna fase (es. SL-10, MP-20, MP-99) → categoria 'altro'
+  const altro = { rows: [] }
+
+  for (const m of materials) {
+    const base = parseFloat(m.qty_base || 0)
+    const inev = parseFloat(m.qty_inevaso || 0)
+    const arrivata = Math.max(0, base - inev)
+    const pct = base > 0 ? Math.round((arrivata / base) * 100) : 100
+    const row = {
+      category_code: m.category_code,
+      material_code: m.material_code,
+      material_desc: m.material_desc,
+      color_desc:    m.color_desc,
+      qty_base:      base,
+      qty_arrivata:  arrivata,
+      qty_inevaso:   inev,
+      pct,
+      status: pct >= 90 ? 'verde' : pct >= 70 ? 'giallo' : 'rosso',
+    }
+    // Trova la fase
+    let phase = null
+    const code = (m.category_code || '').toUpperCase().trim()
+    for (const [ph, cats] of Object.entries(PHASE_CATEGORIES)) {
+      if (cats.includes(code)) { phase = ph; break }
+    }
+    if (phase) {
+      groups[phase].rows.push(row)
+    } else {
+      altro.rows.push(row)
+    }
+  }
+
+  // Status di ogni fase = anello debole tra le sue righe
+  for (const ph of PHASE_ORDER) {
+    const rows = groups[ph].rows
+    if (rows.length === 0) {
+      groups[ph].status = 'verde'  // nessuna riga = materiali consegnati (OPR presente nel file)
+    } else {
+      const rank = { verde: 0, giallo: 1, rosso: 2 }
+      groups[ph].status = rows.reduce((worst, r) =>
+        rank[r.status] > rank[worst] ? r.status : worst, 'verde')
+    }
+  }
+
+  return { ...groups, altro }
+}

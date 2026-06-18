@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { computeOrderPhases, resolveOrderMaterialState, PHASE_ORDER, PHASE_LABELS, STATUS_COLORS } from '../lib/materials'
+import { computeOrderPhases, resolveOrderMaterialState, groupMaterialsByPhase, PHASE_ORDER, PHASE_LABELS, STATUS_COLORS } from '../lib/materials'
 import { useAuth } from '../components/AuthContext'
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -395,6 +395,114 @@ function AssignPanel({ cell, orders, lines, onClose, onSaved, clientId }) {
 }
 
 // ─── TAB: ORDINI ─────────────────────────────────────────────
+// ─── Drill-down dettaglio materiali per ordine ───────────────
+function MaterialDrilldown({ order, materials, seen, onClose }) {
+  const grouped = groupMaterialsByPhase(materials)
+  const hasAnyMaterial = materials.length > 0
+
+  const phaseColor = (status) => STATUS_COLORS[status] || STATUS_COLORS.vuoto
+  const rowStatusColor = (status) =>
+    status === 'verde' ? 'var(--success)' : status === 'giallo' ? 'var(--warning)' : 'var(--danger)'
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 720, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-header">
+          <div>
+            <div className="modal-title">Dettaglio materiali</div>
+            <div className="text-sm text-muted" style={{ marginTop: 2 }}>
+              <span className="mono">{order.order_code}</span> · {order.product}
+            </div>
+          </div>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body" style={{ overflowY: 'auto' }}>
+          {!hasAnyMaterial ? (
+            <div className="empty-state" style={{ padding: 32 }}>
+              <div className="empty-icon">📦</div>
+              <div className="empty-title">
+                {seen ? 'Materiali completati' : 'Distinta non ancora ricevuta'}
+              </div>
+              <div className="empty-sub">
+                {seen
+                  ? 'Tutti i materiali di questo ordine sono già stati consegnati dal brand.'
+                  : 'Il brand non ha ancora inviato la distinta materiali per questo ordine (MP da ricevere).'}
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              {PHASE_ORDER.map(phase => {
+                const g = grouped[phase]
+                return (
+                  <div key={phase}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: 3, background: phaseColor(g.status) }} />
+                      <span style={{ fontWeight: 600, fontSize: 14 }}>{PHASE_LABELS[phase]}</span>
+                      {g.rows.length === 0 && (
+                        <span className="text-xs text-muted">— materiali consegnati</span>
+                      )}
+                    </div>
+                    {g.rows.length > 0 && (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--gray-100)' }}>
+                            <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--gray-500)', fontWeight: 600 }}>Materiale</th>
+                            <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--gray-500)', fontWeight: 600 }}>Colore</th>
+                            <th style={{ textAlign: 'right', padding: '6px 8px', color: 'var(--gray-500)', fontWeight: 600 }}>Richiesto</th>
+                            <th style={{ textAlign: 'right', padding: '6px 8px', color: 'var(--gray-500)', fontWeight: 600 }}>Arrivato</th>
+                            <th style={{ textAlign: 'right', padding: '6px 8px', color: 'var(--gray-500)', fontWeight: 600 }}>%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.rows.map((r, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid var(--gray-50)' }}>
+                              <td style={{ padding: '6px 8px' }}>
+                                <span className="mono" style={{ fontSize: 11, color: 'var(--gray-400)' }}>{r.category_code}</span>{' '}
+                                {r.material_desc || r.material_code || '—'}
+                              </td>
+                              <td style={{ padding: '6px 8px', color: 'var(--gray-500)' }}>{r.color_desc || '—'}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.qty_base.toLocaleString('it-IT')}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.qty_arrivata.toLocaleString('it-IT')}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: rowStatusColor(r.status) }}>
+                                {r.pct}%
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )
+              })}
+              {grouped.altro.rows.length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8, color: 'var(--gray-500)' }}>
+                    Altri materiali (non assegnati a una fase)
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <tbody>
+                      {grouped.altro.rows.map((r, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid var(--gray-50)' }}>
+                          <td style={{ padding: '6px 8px' }}>
+                            <span className="mono" style={{ fontSize: 11, color: 'var(--gray-400)' }}>{r.category_code}</span>{' '}
+                            {r.material_desc || '—'}
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right' }}>{r.qty_base.toLocaleString('it-IT')} / {r.qty_arrivata.toLocaleString('it-IT')}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: rowStatusColor(r.status) }}>{r.pct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Semaforo materiali (3 fasi) ─────────────────────────────
 function MaterialSemaforo({ state }) {
   if (!state) {
@@ -452,12 +560,14 @@ function TabOrders() {
   const [deletingSelected, setDeletingSelected] = useState(false)
   const [orderPhases, setOrderPhases] = useState({})
   const [seenOpr, setSeenOpr] = useState(new Set())
+  const [materialsByOrder, setMaterialsByOrder] = useState({})  // order_code -> rows[]
+  const [drillOrder, setDrillOrder] = useState(null)            // ordine selezionato per drill-down
 
   const load = useCallback(async () => {
     const [{ data }, { data: linesData }, { data: materials }, { data: seen }] = await Promise.all([
       supabase.from('orders_with_totals').select('*').order('due_date', { ascending: true }),
       supabase.from('production_lines').select('id, name').eq('active', true).order('name'),
-      supabase.from('order_materials').select('order_code, category_code, qty_base, qty_inevaso'),
+      supabase.from('order_materials').select('order_code, category_code, material_code, material_desc, color_desc, qty_base, qty_inevaso'),
       supabase.from('materials_seen_opr').select('order_code'),
     ])
     // Filtra ordini archiviati dalla vista (restano in DB per i report)
@@ -466,6 +576,12 @@ function TabOrders() {
     setLines(linesData || [])
     setBrands([...new Set(visibleOrders.map(o => o.brand_name).filter(Boolean))])
     setOrderPhases(computeOrderPhases(materials || []))
+    const matIndex = {}
+    ;(materials || []).forEach(m => {
+      if (!matIndex[m.order_code]) matIndex[m.order_code] = []
+      matIndex[m.order_code].push(m)
+    })
+    setMaterialsByOrder(matIndex)
     setSeenOpr(new Set((seen || []).map(s => s.order_code)))
     setSelected(new Set())
     setLoading(false)
@@ -600,8 +716,10 @@ function TabOrders() {
               </thead>
               <tbody>
                 {filtered.map(o => (
-                  <tr key={o.id} style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined }}>
-                    <td style={{ padding: '8px 6px' }}>
+                  <tr key={o.id}
+                    onClick={() => setDrillOrder(o)}
+                    style={{ background: selected.has(o.id) ? 'var(--ice-light)' : undefined, cursor: 'pointer' }}>
+                    <td style={{ padding: '8px 6px' }} onClick={e => e.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleOne(o.id)} style={{ cursor: 'pointer' }} />
                     </td>
                     <td style={{ whiteSpace: 'nowrap', padding: '8px 8px' }}>
@@ -644,7 +762,7 @@ function TabOrders() {
                       <span style={{ fontWeight: 600, color: 'var(--success)' }}>{(o.quantity_assigned || 0).toLocaleString('it-IT')}</span>
                       <span style={{ color: 'var(--gray-400)' }}> / {(o.quantity || 0).toLocaleString('it-IT')}</span>
                     </td>
-                    <td style={{ padding: '8px 8px', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '8px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         {o.status !== 'completed' && (
                           <button className="btn btn-primary btn-sm" onClick={() => setAdvancing(o)}>Avanza</button>
@@ -676,6 +794,14 @@ function TabOrders() {
       </div>
 
       {advancing && <AdvanceModal order={advancing} lines={lines} onClose={() => setAdvancing(null)} onSaved={() => { setAdvancing(null); load() }} />}
+
+      {drillOrder && (
+        <MaterialDrilldown
+          order={drillOrder}
+          materials={materialsByOrder[drillOrder.order_code] || []}
+          seen={seenOpr.has(drillOrder.order_code)}
+          onClose={() => setDrillOrder(null)} />
+      )}
 
       {deleting && (
         <div className="modal-overlay" onClick={() => setDeleting(null)}>
